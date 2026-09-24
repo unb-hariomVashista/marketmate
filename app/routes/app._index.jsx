@@ -1,11 +1,15 @@
-import { useEffect } from "react";
 import { redirect, useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { UnauthenticatedHome } from "../components/UnauthenticatedHome";
 import { AuthenticatedHome } from "../components/AuthenticatedHome";
-import { getGoogleAccountByShop } from "../repository/user.repository";
+import {
+  getGoogleAccountByShop,
+  getStoresLinkedToGoogleAccount,
+} from "../repository/user.repository";
+import { getSheetsByGoogleAccountId } from "../repository/sheet.repository";
+import { getRecentSyncJobsByShop } from "../repository/sync.repository";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -15,6 +19,12 @@ export const loader = async ({ request }) => {
   const googleAccount = await getGoogleAccountByShop(shop);
 
   if (googleAccount) {
+    const [linkedStores, spreadsheets, recentJobs] = await Promise.all([
+      getStoresLinkedToGoogleAccount(googleAccount.id),
+      getSheetsByGoogleAccountId(googleAccount.id),
+      getRecentSyncJobsByShop(shop, 5),
+    ]);
+
     return Response.json({
       googleAccount: {
         id: googleAccount.id,
@@ -22,6 +32,10 @@ export const loader = async ({ request }) => {
         name: googleAccount.name,
         pictureUrl: googleAccount.pictureUrl,
       },
+      currentShop: shop,
+      linkedStores,
+      spreadsheets,
+      recentJobs,
       googleOauthUrl: null,
     });
   }
@@ -71,7 +85,14 @@ export const action = async ({ request }) => {
 
 export default function Index() {
   const shopify = useAppBridge();
-  const { googleOauthUrl, googleAccount } = useLoaderData();
+  const {
+    googleOauthUrl,
+    googleAccount,
+    currentShop,
+    linkedStores = [],
+    spreadsheets = [],
+    recentJobs = [],
+  } = useLoaderData();
 
   const isConnected = !!googleAccount;
 
@@ -89,7 +110,13 @@ export default function Index() {
       {!isConnected ? (
         <UnauthenticatedHome signInHandler={handleGoogleSignIn} />
       ) : (
-        <AuthenticatedHome googleAccount={googleAccount} />
+        <AuthenticatedHome
+          googleAccount={googleAccount}
+          currentShop={currentShop}
+          linkedStores={linkedStores}
+          spreadsheets={spreadsheets}
+          recentJobs={recentJobs}
+        />
       )}
     </s-page>
   );

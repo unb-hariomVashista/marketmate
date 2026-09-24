@@ -49,9 +49,15 @@ export default defineConfig({
       allow: ["app", "node_modules"],
     },
   },
-  plugins: [reactRouter(), tsconfigPaths(), tailwindcss()],
+  plugins: [tailwindcss(), reactRouter(), tsconfigPaths()],
   build: {
     assetsInlineLimit: 0,
+  },
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
+  ssr: {
+    external: ["googleapis", "@prisma/client"],
   },
   optimizeDeps: {
     include: ["@shopify/app-bridge-react"],

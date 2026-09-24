@@ -103,3 +103,28 @@ export async function updateGoogleAccessToken({ googleAccountId, accessToken, ex
     },
   });
 }
+
+/**
+ * Retrieves a Google account by primary key ID.
+ */
+export async function getGoogleAccountById(id) {
+  if (!id) return null;
+  return prisma.googleAccount.findUnique({
+    where: { id },
+  });
+}
+
+/**
+ * Retrieves all stores linked to a given Google account.
+ */
+export async function getStoresLinkedToGoogleAccount(googleAccountId) {
+  if (!googleAccountId) return [];
+  return prisma.storeGoogleConnection.findMany({
+    where: { googleAccountId },
+    select: {
+      shop: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "asc" },
+  });
+}

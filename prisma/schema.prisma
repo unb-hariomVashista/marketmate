@@ -47,6 +47,7 @@ model GoogleAccount {
   createdAt             DateTime                @default(now())
   updateAt              DateTime                @updatedAt
   storeConnection       StoreGoogleConnection[]
+  spreadsheets          AppSpreadsheet[]
 }
 
 model StoreGoogleConnection {
@@ -58,4 +59,56 @@ model StoreGoogleConnection {
   updatedAt       DateTime       @updatedAt
 
   @@index([googleAccountId])
+}
+
+model AppSpreadsheet {
+  id              String        @id @default(uuid())
+  googleAccountId String
+  googleAccount   GoogleAccount @relation(fields: [googleAccountId], references: [id], onDelete: Cascade)
+  spreadsheetId   String        // Google's internal spreadsheet ID
+  spreadsheetUrl  String
+  title           String
+  type            String        // "PRICING" or "INVENTORY"
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  tabs            SheetTab[]
+  syncJobs        SyncJob[]
+
+  @@unique([googleAccountId, spreadsheetId])
+  @@index([googleAccountId])
+}
+
+model SheetTab {
+  id               String         @id @default(uuid())
+  spreadsheetId    String
+  spreadsheet      AppSpreadsheet @relation(fields: [spreadsheetId], references: [id], onDelete: Cascade)
+  shop             String         // Myshopify domain (e.g. store-a.myshopify.com)
+  marketId         String         // Shopify Market GID (gid://shopify/Market/12345)
+  marketName       String         // e.g. "Singapore", "India"
+  tabTitle         String         // e.g. "Store1 - Singapore"
+  tabGid           Int?           // Google Sheets tab sheetId
+  lastSyncedAt     DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([spreadsheetId, tabTitle])
+  @@index([shop, marketId])
+}
+
+model SyncJob {
+  id            String         @id @default(uuid())
+  spreadsheetId String
+  spreadsheet   AppSpreadsheet @relation(fields: [spreadsheetId], references: [id], onDelete: Cascade)
+  shop          String
+  marketId      String?
+  type          String         // "PRICING" or "INVENTORY"
+  direction     String         // "SHOPIFY_TO_SHEET" or "SHEET_TO_SHOPIFY"
+  status        String         @default("IDLE") // "IDLE", "IN_PROGRESS", "SUCCESS", "FAILED", "PARTIAL_FAILED"
+  summary       String?        // e.g. "Updated 45 products, 2 failed"
+  errorLogs     String?        // Detailed error logs if any
+  startedAt     DateTime       @default(now())
+  completedAt   DateTime?
+
+  @@index([shop, spreadsheetId])
 }
