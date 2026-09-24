@@ -105,20 +105,20 @@ export default function Index() {
     window.top.location.href = googleOauthUrl;
   };
 
-  return (
+  return !isConnected ? (
     <s-page heading="MarketMate">
-      {!isConnected ? (
-        <UnauthenticatedHome signInHandler={handleGoogleSignIn} />
-      ) : (
-        <AuthenticatedHome
-          googleAccount={googleAccount}
-          currentShop={currentShop}
-          linkedStores={linkedStores}
-          spreadsheets={spreadsheets}
-          recentJobs={recentJobs}
-        />
-      )}
+      <UnauthenticatedHome signInHandler={handleGoogleSignIn} />
     </s-page>
+  ) : (
+    <div className="min-h-screen bg-[#f8fafc] -m-4 sm:-m-6 md:-m-8 p-3 sm:p-5 md:p-8">
+      <AuthenticatedHome
+        googleAccount={googleAccount}
+        currentShop={currentShop}
+        linkedStores={linkedStores}
+        spreadsheets={spreadsheets}
+        recentJobs={recentJobs}
+      />
+    </div>
   );
 }
 
