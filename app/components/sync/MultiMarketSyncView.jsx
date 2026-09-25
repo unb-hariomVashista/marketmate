@@ -18,6 +18,8 @@ import {
   Info,
   Layers,
   Sparkles,
+  ShieldAlert,
+  AlertTriangle,
 } from "lucide-react";
 
 export function MultiMarketSyncView({
@@ -30,6 +32,8 @@ export function MultiMarketSyncView({
   shop = null,
   currentShop = "",
   googleOauthUrl = null,
+  storePlan = null,
+  planAccess = null,
 }) {
   const shopify = useAppBridge();
 
@@ -52,12 +56,22 @@ export function MultiMarketSyncView({
   // Stepper State
   const [currentStep, setCurrentStep] = useState(1);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [sourceTabsByItemId, setSourceTabsByItemId] = useState({});
+
+  const setSourceTabForItem = (itemId, tabTitle) => {
+    setSourceTabsByItemId((prev) => ({
+      ...prev,
+      [itemId]: tabTitle,
+    }));
+  };
 
   // Modals & Sheet Creation
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
-  const [isCreatingSheet, setIsCreatingSheet] = useState(false);
+  const [isCreatingSheet, setIsCreatingSheet] = useState(
+    spreadsheets.length === 0,
+  );
   const [newSheetTitle, setNewSheetTitle] = useState(
-    isInventory ? "Market Inventory 2026" : "Market Pricing 2026",
+    `${shopName} - ${isInventory ? "Inventory" : "Pricing"}`,
   );
   const [isSubmittingSheet, setIsSubmittingSheet] = useState(false);
 
@@ -69,7 +83,8 @@ export function MultiMarketSyncView({
   const [syncResult, setSyncResult] = useState(null);
 
   const activeSheet =
-    spreadsheets.find((s) => s.id === selectedSheetId) || spreadsheets[0];
+    spreadsheets.find((s) => s.id === selectedSheetId) ||
+    (spreadsheets.length > 0 ? spreadsheets[0] : null);
 
   // Handle Google OAuth Connect
   const handleConnectGoogle = () => {
@@ -158,12 +173,14 @@ export function MultiMarketSyncView({
     try {
       const targetItem =
         items.find((it) => it.id === selectedItemIds[0]) || items[0];
+      const targetSourceTab = sourceTabsByItemId[targetItem?.id] || undefined;
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           actionType: isInventory ? "PREVIEW_INVENTORY" : "PREVIEW_PRICING",
           spreadsheetId: selectedSheetId,
+          sourceTabTitle: targetSourceTab,
           ...(isInventory
             ? { locationId: targetItem.id }
             : { marketId: targetItem.id }),
@@ -206,21 +223,28 @@ export function MultiMarketSyncView({
 
     for (const itemId of selectedItemIds) {
       try {
+        const itemSourceTab = sourceTabsByItemId[itemId] || undefined;
         const response = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             actionType,
             spreadsheetId: selectedSheetId,
+            sourceTabTitle: itemSourceTab,
             ...(isInventory ? { locationId: itemId } : { marketId: itemId }),
           }),
         });
 
         const resData = await response.json();
-        if (response.ok) {
+        if (response.ok && (!resData.result?.errors || resData.result.errors.length === 0)) {
           successCount++;
         } else {
-          errors.push(resData.error || `Sync failed for ${itemSingularLabel}`);
+          const errMsg =
+            resData.error ||
+            (resData.result?.errors && resData.result.errors.length > 0
+              ? resData.result.errors.join("; ")
+              : `Sync failed for ${itemSingularLabel}`);
+          errors.push(errMsg);
         }
       } catch (err) {
         errors.push(err.message);
@@ -265,10 +289,26 @@ export function MultiMarketSyncView({
     <div className="max-w-6xl mx-auto px-2 sm:px-4 py-4 font-sans text-gray-900 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 py-2">
         <div className="space-y-1.5 max-w-2xl">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-950">
               Multi-market sync
             </h1>
+            {storePlan?.plan === "PRO" ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Pro Plan ($22/mo) • Unlimited
+              </span>
+            ) : storePlan?.plan === "STANDARD" ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                Standard Plan ($11/mo) • {isInventory ? `${locations.length}/3 Locations` : `${markets.length}/3 Markets`}
+              </span>
+            ) : (
+              <a
+                href={`/app/plans?returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> No Active Plan (Select $11 or $22)
+              </a>
+            )}
           </div>
           <p className="text-sm font-semibold text-gray-700">
             Keep your product data in sync between your store and Google Sheets.
@@ -465,6 +505,35 @@ export function MultiMarketSyncView({
         </div>
       </div>
 
+      {/* Plan Limitation Alert Banner */}
+      {planAccess && !planAccess.allowed && (
+        <div className="bg-amber-50 border-2 border-amber-400/80 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 border border-amber-300">
+              <ShieldAlert className="w-5 h-5 stroke-[2.2]" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-amber-950">
+                {planAccess.reason === "NO_PLAN"
+                  ? "Active Subscription Required"
+                  : "Pro Plan ($22/mo) Required for this Store"}
+              </h4>
+              <p className="text-xs text-amber-900 leading-relaxed max-w-2xl">
+                {planAccess.message}
+              </p>
+            </div>
+          </div>
+
+          <a
+            href={`/app/plans?returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold shrink-0 shadow-xs transition-colors"
+          >
+            <span>{planAccess.requiredPlan === "PRO" ? "Upgrade to Pro ($22/mo)" : "Choose Plan ($11 or $22)"}</span>
+            <ArrowRight className="w-4 h-4" />
+          </a>
+        </div>
+      )}
+
       {/* 3. DIRECTION SELECTOR (TWO BIG CARDS) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Card 1: Sync from sheet to store */}
@@ -594,29 +663,36 @@ export function MultiMarketSyncView({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             {/* LEFT COLUMN: Vertical Stepper Navigation */}
             <div className="lg:col-span-3 pr-2 lg:border-r lg:border-gray-100">
-              <div className="space-y-6">
+              <div className="space-y-0">
                 {/* Step 1 */}
                 <div
                   onClick={() => currentStep > 1 && setCurrentStep(1)}
-                  className={`flex items-start gap-3.5 ${
+                  className={`relative flex items-start gap-3.5 pb-8 ${
                     currentStep > 1 ? "cursor-pointer" : ""
                   }`}
                 >
+                  {/* Continuous Connecting Line to Step 2 */}
                   <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
+                    className={`absolute w-0.5 transition-colors ${
+                      currentStep > 1 ? "bg-emerald-600" : "bg-gray-200"
+                    }`}
+                    style={{ left: "13px", top: "28px", bottom: "-2px" }}
+                  />
+                  <div
+                    className={`relative z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
                       currentStep === 1
-                        ? "bg-[#044e3d] text-white"
+                        ? "bg-[#044e3d] text-white ring-4 ring-emerald-100"
                         : currentStep > 1
-                          ? "bg-emerald-100 text-emerald-800"
+                          ? "bg-emerald-600 text-white"
                           : "bg-gray-100 text-gray-400"
                     }`}
                   >
-                    {currentStep > 1 ? <Check className="w-3.5 h-3.5" /> : "1"}
+                    {currentStep > 1 ? <Check className="w-3.5 h-3.5 stroke-[2.5]" /> : "1"}
                   </div>
-                  <div>
+                  <div className="pt-0.5">
                     <h4
                       className={`text-xs font-bold ${
-                        currentStep === 1 ? "text-gray-950" : "text-gray-600"
+                        currentStep === 1 ? "text-gray-950 font-extrabold" : "text-gray-600"
                       }`}
                     >
                       Select {itemPluralLabel.toLowerCase()}
@@ -631,31 +707,35 @@ export function MultiMarketSyncView({
                   </div>
                 </div>
 
-                {/* Vertical Line 1 -> 2 */}
-                <div className="w-0.5 h-6 bg-gray-200 ml-3.5 -my-3" />
-
                 {/* Step 2 */}
                 <div
                   onClick={() => currentStep > 2 && setCurrentStep(2)}
-                  className={`flex items-start gap-3.5 ${
+                  className={`relative flex items-start gap-3.5 pb-8 ${
                     currentStep > 2 ? "cursor-pointer" : ""
                   }`}
                 >
+                  {/* Continuous Connecting Line to Step 3 */}
                   <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
+                    className={`absolute w-0.5 transition-colors ${
+                      currentStep > 2 ? "bg-emerald-600" : "bg-gray-200"
+                    }`}
+                    style={{ left: "13px", top: "28px", bottom: "-2px" }}
+                  />
+                  <div
+                    className={`relative z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
                       currentStep === 2
-                        ? "bg-[#044e3d] text-white"
+                        ? "bg-[#044e3d] text-white ring-4 ring-emerald-100"
                         : currentStep > 2
-                          ? "bg-emerald-100 text-emerald-800"
+                          ? "bg-emerald-600 text-white"
                           : "bg-gray-100 text-gray-400"
                     }`}
                   >
-                    {currentStep > 2 ? <Check className="w-3.5 h-3.5" /> : "2"}
+                    {currentStep > 2 ? <Check className="w-3.5 h-3.5 stroke-[2.5]" /> : "2"}
                   </div>
-                  <div>
+                  <div className="pt-0.5">
                     <h4
                       className={`text-xs font-bold ${
-                        currentStep === 2 ? "text-gray-950" : "text-gray-600"
+                        currentStep === 2 ? "text-gray-950 font-extrabold" : "text-gray-600"
                       }`}
                     >
                       Review changes
@@ -667,15 +747,12 @@ export function MultiMarketSyncView({
                   </div>
                 </div>
 
-                {/* Vertical Line 2 -> 3 */}
-                <div className="w-0.5 h-6 bg-gray-200 ml-3.5 -my-3" />
-
                 {/* Step 3 */}
-                <div className="flex items-start gap-3.5">
+                <div className="relative flex items-start gap-3.5">
                   <div
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
+                    className={`relative z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors ${
                       currentStep === 3
-                        ? "bg-[#044e3d] text-white"
+                        ? "bg-[#044e3d] text-white ring-4 ring-emerald-100"
                         : "bg-gray-100 text-gray-400"
                     }`}
                   >
@@ -684,7 +761,7 @@ export function MultiMarketSyncView({
                   <div>
                     <h4
                       className={`text-xs font-bold ${
-                        currentStep === 3 ? "text-gray-950" : "text-gray-600"
+                        currentStep === 3 ? "text-gray-950 font-extrabold" : "text-gray-600"
                       }`}
                     >
                       {activeDirection === "SHOPIFY_TO_SHEET"
@@ -818,17 +895,7 @@ export function MultiMarketSyncView({
                               {isInventory ? (
                                 <Store className="w-3.5 h-3.5 text-emerald-600" />
                               ) : (
-                                <span className="text-sm leading-none">
-                                  {it.name.toLowerCase().includes("dubai")
-                                    ? "🇦🇪"
-                                    : it.name.toLowerCase().includes("india")
-                                      ? "🇮🇳"
-                                      : it.name
-                                            .toLowerCase()
-                                            .includes("singapore")
-                                        ? "🇸🇬"
-                                        : "🌐"}
-                                </span>
+                                <Globe className="w-3.5 h-3.5 text-emerald-600" />
                               )}
                               <span>
                                 {it.name}{" "}
@@ -846,6 +913,87 @@ export function MultiMarketSyncView({
                             </span>
                           ))}
                       </div>
+
+                      {/* Cross-Store Source Tab Selector */}
+                      {activeDirection === "SHEET_TO_SHOPIFY" && (
+                        <div className="p-4 sm:p-5 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl space-y-4 shadow-2xs mt-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Layers className="w-4 h-4 text-indigo-700" />
+                              <label className="text-xs font-bold text-gray-950">
+                                Source Tabs in Google Sheet (Sync From)
+                              </label>
+                            </div>
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                              SKU Matching
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-gray-600 leading-relaxed">
+                            Configure the source Google Sheet tab to sync for each selected {itemSingularLabel.toLowerCase()}.
+                            Each {itemSingularLabel.toLowerCase()} can read from its own designated tab, or cross-sync data from another store / market.
+                          </p>
+
+                          {/* Individual Option per Selected Item */}
+                          <div className="space-y-2.5">
+                            {items
+                              .filter((it) => selectedItemIds.includes(it.id))
+                              .map((item) => {
+                                const currentTabVal = sourceTabsByItemId[item.id] || "";
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className="bg-white border border-indigo-100/90 rounded-xl p-3 shadow-2xs space-y-1.5"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                                        <span className="text-xs font-bold text-gray-900">
+                                          {item.name}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] text-gray-400 font-semibold">
+                                        Target {itemSingularLabel}
+                                      </span>
+                                    </div>
+
+                                    <select
+                                      value={currentTabVal}
+                                      onChange={(e) =>
+                                        setSourceTabForItem(item.id, e.target.value)
+                                      }
+                                      className="w-full text-xs font-medium bg-[#fcfdff] border border-gray-300 rounded-lg px-3 py-2 shadow-2xs focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer text-gray-800"
+                                    >
+                                      <option value="">
+                                        Auto-detect ({shopName} - {item.name} {isInventory ? "Inventory" : "Pricing"})
+                                      </option>
+                                      {activeSheet?.tabs?.map((t) => {
+                                        const cleanTitle = (t.tabTitle || "")
+                                          .replace(
+                                            /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1FAFF}]/gu,
+                                            ""
+                                          )
+                                          .trim();
+                                        return (
+                                          <option key={t.id || t.tabTitle} value={t.tabTitle}>
+                                            {cleanTitle}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  </div>
+                                );
+                              })}
+                          </div>
+
+                          <div className="flex items-start gap-2 pt-1 text-[11px] text-indigo-900 bg-white/80 rounded-xl p-2.5 border border-indigo-100">
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
+                            <span>
+                              <strong>Cross-Store SKU Matching:</strong> Rows in each source tab are mapped to this store's products by matching their <strong>SKU</strong>, even across different Shopify store IDs.
+                            </span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Store settings callout box */}
                       <div className="p-3.5 border border-gray-200 rounded-2xl flex items-center justify-between gap-3 bg-white mt-5 shadow-2xs">
@@ -930,7 +1078,33 @@ export function MultiMarketSyncView({
                   </div>
 
                   {/* Connected Google Sheet Bottom Card */}
-                  {activeSheet && (
+                  {!activeSheet ? (
+                    <div className="p-4 border border-amber-200 bg-amber-50/70 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-3">
+                        <FileSpreadsheet className="w-8 h-8 text-amber-600 shrink-0" />
+                        <div>
+                          <p className="text-xs font-bold text-amber-950">
+                            No {itemPluralLabel.toLowerCase()} spreadsheet connected
+                          </p>
+                          <p className="text-[11px] text-amber-800">
+                            Create or connect a Google Sheet to begin syncing with your store.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (spreadsheets.length === 0) {
+                            setIsCreatingSheet(true);
+                          }
+                          setIsSheetModalOpen(true);
+                        }}
+                        className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
+                      >
+                        + Create {itemSingularLabel} Sheet
+                      </button>
+                    </div>
+                  ) : (
                     <div className="p-4 border border-gray-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white shadow-2xs">
                       <div className="flex items-center gap-3.5">
                         <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0 text-white shadow-2xs">
@@ -970,12 +1144,24 @@ export function MultiMarketSyncView({
                   )}
 
                   {/* Continue Button */}
-                  <div className="flex justify-end pt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                    {planAccess && !planAccess.allowed ? (
+                      <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                        {planAccess.message}
+                      </p>
+                    ) : !activeSheet ? (
+                      <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                        Please connect or create a {itemSingularLabel.toLowerCase()} spreadsheet to continue.
+                      </p>
+                    ) : <div />}
+
                     <button
                       type="button"
                       onClick={handleProceedToStep2}
-                      disabled={selectedItemIds.length === 0}
-                      className="px-6 py-2.5 bg-[#044e3d] hover:bg-[#033c2e] text-white font-bold text-xs rounded-xl inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                      disabled={selectedItemIds.length === 0 || !activeSheet || (planAccess && !planAccess.allowed)}
+                      className="px-6 py-2.5 bg-[#044e3d] hover:bg-[#033c2e] text-white font-bold text-xs rounded-xl inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed self-end sm:self-auto"
                     >
                       <span>Continue</span>
                       <ArrowRight className="w-4 h-4" />
@@ -1017,14 +1203,48 @@ export function MultiMarketSyncView({
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-2xl text-xs space-y-2">
-                        <p className="font-bold text-gray-900 text-sm">
-                          {activeDirection === "SHOPIFY_TO_SHEET"
-                            ? `Ready to export ${selectedItemIds.length} ${itemPluralLabel.toLowerCase()} tab(s) to "${activeSheet?.title}".`
-                            : `Ready to sync updates from "${activeSheet?.title}" into Shopify store.`}
-                        </p>
+                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-2xl text-xs space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <p className="font-bold text-gray-900 text-sm">
+                            {activeDirection === "SHOPIFY_TO_SHEET"
+                              ? `Ready to export ${selectedItemIds.length} ${itemPluralLabel.toLowerCase()} tab(s) to "${activeSheet?.title || 'Selected Sheet'}".`
+                              : `Ready to sync updates for ${selectedItemIds.length} ${itemPluralLabel.toLowerCase()} into Shopify store.`}
+                          </p>
+                          {activeDirection === "SHEET_TO_SHOPIFY" && previewSummary?.matchedBySku > 0 && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                              {previewSummary.matchedBySku} matched by SKU (Cross-store)
+                            </span>
+                          )}
+                        </div>
+
+                        {activeDirection === "SHEET_TO_SHOPIFY" && (
+                          <div className="space-y-1.5 pt-1">
+                            <p className="text-[11px] font-bold text-gray-700">
+                              Configured Tab Mappings:
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {items
+                                .filter((it) => selectedItemIds.includes(it.id))
+                                .map((item) => (
+                                  <div
+                                    key={item.id}
+                                    className="p-2.5 bg-white border border-gray-200 rounded-xl text-[11px] flex items-center justify-between"
+                                  >
+                                    <span className="font-bold text-gray-900">
+                                      {item.name}
+                                    </span>
+                                    <span className="text-gray-500 font-mono text-[10px] truncate max-w-[160px]">
+                                      ← {sourceTabsByItemId[item.id] || "Auto-detect tab"}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
                         <p className="text-gray-600">
-                          Selected {itemPluralLabel.toLowerCase()}:{" "}
+                          Destination {itemPluralLabel.toLowerCase()}:{" "}
                           <span className="font-semibold text-gray-900">
                             {items
                               .filter((it) => selectedItemIds.includes(it.id))
@@ -1068,7 +1288,7 @@ export function MultiMarketSyncView({
                   )}
 
                   {/* Actions */}
-                  <div className="flex items-center justify-between pt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
                     <button
                       type="button"
                       onClick={() => setCurrentStep(1)}
@@ -1077,18 +1297,27 @@ export function MultiMarketSyncView({
                       Previous
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={handleExecuteSync}
-                      className="px-6 py-2.5 bg-[#044e3d] hover:bg-[#033c2e] text-white font-bold text-xs rounded-xl inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer"
-                    >
-                      <span>
-                        {activeDirection === "SHOPIFY_TO_SHEET"
-                          ? "Start Export"
-                          : "Start Sync to Store"}
-                      </span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {planAccess && !planAccess.allowed && (
+                        <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                          {planAccess.message}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleExecuteSync}
+                        disabled={isSyncing || (planAccess && !planAccess.allowed)}
+                        className="px-6 py-2.5 bg-[#044e3d] hover:bg-[#033c2e] text-white font-bold text-xs rounded-xl inline-flex items-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <span>
+                          {activeDirection === "SHOPIFY_TO_SHEET"
+                            ? "Start Export"
+                            : "Start Sync to Store"}
+                        </span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

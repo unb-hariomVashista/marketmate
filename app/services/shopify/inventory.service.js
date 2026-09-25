@@ -1,7 +1,9 @@
+import crypto from "crypto";
+
 /**
  * Fetches products, variants, and their inventory levels across specific locations.
  */
-export async function fetchProductsWithInventory(admin, locationIds = []) {
+export async function fetchProductsWithInventory(admin, _locationIds = []) {
   const query = `#graphql
     query GetVariantsWithInventory($cursor: String) {
       productVariants(first: 50, after: $cursor) {
@@ -22,7 +24,7 @@ export async function fetchProductsWithInventory(admin, locationIds = []) {
           inventoryItem {
             id
             tracked
-            inventoryLevels(first: 10) {
+            inventoryLevels(first: 50) {
               nodes {
                 id
                 location {
@@ -99,8 +101,8 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
   }
 
   const mutation = `#graphql
-    mutation SetInventoryQuantities($input: InventorySetQuantitiesInput!) {
-      inventorySetQuantities(input: $input) {
+    mutation SetInventoryQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+      inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
         inventoryAdjustmentGroup {
           reason
         }
@@ -125,17 +127,32 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
           input: {
             name: "available",
             reason: "correction",
-            ignoreCompareQuantity: true,
-            quantities: chunk,
+            quantities: chunk.map((item) => ({
+              inventoryItemId: item.inventoryItemId,
+              locationId: item.locationId,
+              quantity: parseInt(item.quantity, 10),
+              changeFromQuantity: null,
+            })),
           },
+          idempotencyKey: crypto.randomUUID(),
         },
       });
 
       const data = await response.json();
+
+      if (data.errors && data.errors.length > 0) {
+        const topErrors = data.errors.map((e) => e.message).join(", ");
+        console.error("GraphQL inventorySetQuantities top-level error:", topErrors);
+        errors.push(topErrors);
+        continue;
+      }
+
       const userErrors = data.data?.inventorySetQuantities?.userErrors || [];
 
       if (userErrors.length > 0) {
-        errors.push(...userErrors.map((e) => e.message));
+        const uErr = userErrors.map((e) => e.message).join(", ");
+        console.error("inventorySetQuantities userErrors:", uErr);
+        errors.push(uErr);
       } else {
         successCount += chunk.length;
       }

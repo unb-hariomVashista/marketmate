@@ -64,7 +64,7 @@ export const loader = async ({ request }) => {
         }
 
         // Link Google Account to the Shopify Store
-        await linkGoogleAccountToStore({
+        const googleAccount = await linkGoogleAccountToStore({
             shop: targetShop,
             googleUser: {
                 googleUserId: userInfo.sub,

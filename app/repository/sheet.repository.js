@@ -1,4 +1,4 @@
-import prisma from "../db.server";
+import prisma from "../db.server.js";
 
 /**
  * Retrieves all spreadsheets belonging to a Google Account, optionally filtered by type (PRICING or INVENTORY).

@@ -12,6 +12,7 @@ import {
   fetchProductsWithPricing,
   batchUpdatePriceList,
   batchUpdateBaseVariantPrices,
+  ensureMarketPriceList,
 } from "./shopify/pricing.service";
 import { upsertSheetTab, updateTabLastSynced } from "../repository/sheet.repository";
 import { createSyncJob, updateSyncJob } from "../repository/sync.repository";
@@ -25,7 +26,7 @@ export async function exportInventoryToSheet({
   googleAccount,
   spreadsheet,
   location,
-  market = null,
+  market: _market = null,
   locations = [],
 }) {
   const targetLocation = location || locations[0];
@@ -129,8 +130,9 @@ export async function importInventoryFromSheet({
   googleAccount,
   spreadsheet,
   location,
-  market = null,
+  market: _market = null,
   locations = [],
+  sourceTabTitle = null,
 }) {
   const targetLocation = location || locations[0];
   if (!targetLocation) {
@@ -146,7 +148,8 @@ export async function importInventoryFromSheet({
   });
 
   try {
-    const tabTitle = `${shop.name || "Store"} - ${targetLocation.name} Inventory`.slice(0, 95);
+    const defaultTabTitle = `${shop.name || "Store"} - ${targetLocation.name} Inventory`.slice(0, 95);
+    const tabTitle = sourceTabTitle || defaultTabTitle;
 
     // 1. Read sheet data
     const { headers, rows } = await readTabValues({
@@ -159,77 +162,96 @@ export async function importInventoryFromSheet({
       throw new Error(`Sheet tab "${tabTitle}" is empty or has no data rows.`);
     }
 
-    // Map column headers: support "Available Quantity", "Quantity", or "[Location] (Qty)"
-    const locationColMap = [];
-    const directQtyIndex = headers.findIndex(
+    // Map column headers: support "SKU", "Available Quantity", "Quantity", or "[Location] (Qty)"
+    const skuColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "SKU");
+    const _barcodeColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "BARCODE");
+
+    let qtyColIndex = headers.findIndex(
       (h) =>
         h === "Available Quantity" ||
         h === "Quantity" ||
         h === "Qty" ||
-        h.toLowerCase().includes("available")
+        h.toLowerCase().includes("available") ||
+        h.toLowerCase().includes("qty")
     );
 
-    if (directQtyIndex !== -1) {
-      locationColMap.push({ locationId: targetLocation.id, colIndex: directQtyIndex });
-    } else {
+    if (qtyColIndex === -1) {
       const locHeader = `${targetLocation.name} (Qty)`;
-      const colIndex = headers.indexOf(locHeader);
-      if (colIndex !== -1) {
-        locationColMap.push({ locationId: targetLocation.id, colIndex });
-      }
+      qtyColIndex = headers.indexOf(locHeader);
     }
 
-    if (locationColMap.length === 0) {
+    if (qtyColIndex === -1) {
       throw new Error(
-        `Could not find an "Available Quantity" column in sheet tab "${tabTitle}".`
+        `Could not find an "Available Quantity" column in sheet tab "${tabTitle}". Headers found: ${headers.join(", ")}`
       );
     }
 
-    // 2. Fetch current inventory to get inventoryItemId and compare diffs
+    // 2. Fetch current inventory of target store to match by SKU / Variant ID and compare diffs
+    const queryLocations =
+      locations && locations.length > 0 ? locations.map((l) => l.id) : [targetLocation.id];
     const currentVariants = await fetchProductsWithInventory(
       admin,
-      locations.map((l) => l.id)
+      queryLocations
     );
+
+    // Primary: SKU lookup (cross-store mapping)
+    const skuMap = new Map();
+    for (const v of currentVariants) {
+      if (v.sku && v.sku.trim()) {
+        skuMap.set(v.sku.trim().toLowerCase(), v);
+      }
+    }
+    // Fallback: Variant ID lookup (same-store mapping)
     const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
 
     const quantitiesToUpdate = [];
+    let matchedBySkuCount = 0;
+    let matchedByGidCount = 0;
     let skippedCount = 0;
     let invalidCount = 0;
 
     for (const row of rows) {
-      const variantId = row[0]?.trim();
-      if (!variantId || !variantId.startsWith("gid://shopify/ProductVariant/")) {
-        invalidCount++;
-        continue;
+      const rawVariantId = row[0]?.trim();
+      const rawSku = skuColIndex !== -1 ? row[skuColIndex]?.toString().trim() : null;
+
+      // Match by SKU first (handles cross-store syncing e.g. Store A -> Store B)
+      let matchedVariant = null;
+      let matchType = null;
+
+      if (rawSku && skuMap.has(rawSku.toLowerCase())) {
+        matchedVariant = skuMap.get(rawSku.toLowerCase());
+        matchType = "SKU";
+      } else if (rawVariantId && variantMap.has(rawVariantId)) {
+        matchedVariant = variantMap.get(rawVariantId);
+        matchType = "VARIANT_ID";
       }
 
-      const existing = variantMap.get(variantId);
-      if (!existing || !existing.inventoryItemId) {
+      if (!matchedVariant || !matchedVariant.inventoryItemId) {
         skippedCount++;
         continue;
       }
 
-      // Check each location
-      for (const { locationId, colIndex } of locationColMap) {
-        const rawQty = row[colIndex];
-        const newQty = parseInt(rawQty, 10);
+      const rawQty = row[qtyColIndex];
+      const newQty = parseInt(rawQty, 10);
 
-        if (isNaN(newQty) || newQty < 0) {
-          invalidCount++;
-          continue;
-        }
+      if (isNaN(newQty) || newQty < 0) {
+        // invalid quantity row
+        continue;
+      }
 
-        const currentQty = existing.quantitiesByLocation[locationId] ?? 0;
-        // Diffing: only update if changed
-        if (newQty !== currentQty) {
-          quantitiesToUpdate.push({
-            inventoryItemId: existing.inventoryItemId,
-            locationId,
-            quantity: newQty,
-          });
-        } else {
-          skippedCount++;
-        }
+      const currentQty = matchedVariant.quantitiesByLocation[targetLocation.id] ?? 0;
+      // Diffing: only update if changed
+      if (newQty !== currentQty) {
+        quantitiesToUpdate.push({
+          inventoryItemId: matchedVariant.inventoryItemId,
+          locationId: targetLocation.id,
+          quantity: newQty,
+        });
+
+        if (matchType === "SKU") matchedBySkuCount++;
+        else matchedByGidCount++;
+      } else {
+        skippedCount++;
       }
     }
 
@@ -239,7 +261,7 @@ export async function importInventoryFromSheet({
       quantitiesToUpdate
     );
 
-    const summary = `Updated ${successCount} location-inventory entries. Skipped ${skippedCount} unchanged/untracked. ${invalidCount} invalid rows skipped.`;
+    const summary = `Synced from tab "${tabTitle}" into "${targetLocation.name}". Updated ${successCount} entries (${matchedBySkuCount} matched via SKU, ${matchedByGidCount} matched via Variant ID). Skipped ${skippedCount} unchanged/unmatched.`;
 
     await updateSyncJob(syncJob.id, {
       status: errors.length > 0 ? "PARTIAL_FAILED" : "SUCCESS",
@@ -248,7 +270,7 @@ export async function importInventoryFromSheet({
       completed: true,
     });
 
-    return { success: true, summary, errors };
+    return { success: true, summary, errors, matchedBySkuCount, matchedByGidCount };
   } catch (error) {
     console.error("Import inventory error:", error);
     await updateSyncJob(syncJob.id, {
@@ -372,6 +394,7 @@ export async function importPricingFromSheet({
   googleAccount,
   spreadsheet,
   market,
+  sourceTabTitle = null,
 }) {
   const syncJob = await createSyncJob({
     spreadsheetId: spreadsheet.id,
@@ -382,7 +405,8 @@ export async function importPricingFromSheet({
   });
 
   try {
-    const tabTitle = `${shop.name || "Store"} - ${market.name} Pricing`.slice(0, 95);
+    const defaultTabTitle = `${shop.name || "Store"} - ${market.name} Pricing`.slice(0, 95);
+    const tabTitle = sourceTabTitle || defaultTabTitle;
 
     // 1. Read sheet data
     const { headers, rows } = await readTabValues({
@@ -395,34 +419,66 @@ export async function importPricingFromSheet({
       throw new Error(`Sheet tab "${tabTitle}" is empty or has no data rows.`);
     }
 
-    const priceColIndex = headers.findIndex((h) => h.includes("Market Price"));
-    const compareAtColIndex = headers.indexOf("Compare At Price");
+    const skuColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "SKU");
+    const _barcodeColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "BARCODE");
+    
+    // Prioritize "Market Price" over "Base Price" when both exist
+    let priceColIndex = headers.findIndex((h) =>
+      h.toLowerCase().includes("market price")
+    );
+    if (priceColIndex === -1) {
+      priceColIndex = headers.findIndex((h) =>
+        h.toLowerCase().includes("price") && !h.toLowerCase().includes("compare")
+      );
+    }
+    const compareAtColIndex = headers.findIndex((h) =>
+      h.toLowerCase().includes("compare")
+    );
 
     if (priceColIndex === -1) {
-      throw new Error("Could not find 'Market Price' column in sheet.");
+      throw new Error(`Could not find a price column in sheet tab "${tabTitle}". Headers found: ${headers.join(", ")}`);
     }
 
-    // 2. Fetch current prices for diffing
+    // 2. Fetch current prices in target store for diffing and matching
     const currentVariants = await fetchProductsWithPricing(admin, {
       countryCode: market.primaryCountryCode,
       marketId: market.id,
       priceListId: market.priceListId,
     });
+
+    // Primary: SKU lookup (cross-store mapping!)
+    const skuMap = new Map();
+    for (const v of currentVariants) {
+      if (v.sku && v.sku.trim()) {
+        skuMap.set(v.sku.trim().toLowerCase(), v);
+      }
+    }
+    // Fallback: Variant ID lookup (same-store mapping)
     const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
 
     const pricesToAdd = [];
+    let matchedBySkuCount = 0;
+    let matchedByGidCount = 0;
     let skippedCount = 0;
     let invalidCount = 0;
 
     for (const row of rows) {
-      const variantId = row[0]?.trim();
-      if (!variantId || !variantId.startsWith("gid://shopify/ProductVariant/")) {
-        invalidCount++;
-        continue;
+      const rawVariantId = row[0]?.trim();
+      const rawSku = skuColIndex !== -1 ? row[skuColIndex]?.toString().trim() : null;
+
+      // Match by SKU first (handles cross-store mapping e.g. Store A -> Store B)
+      let matchedVariant = null;
+      let matchType = null;
+
+      if (rawSku && skuMap.has(rawSku.toLowerCase())) {
+        matchedVariant = skuMap.get(rawSku.toLowerCase());
+        matchType = "SKU";
+      } else if (rawVariantId && variantMap.has(rawVariantId)) {
+        matchedVariant = variantMap.get(rawVariantId);
+        matchType = "VARIANT_ID";
       }
 
-      const existing = variantMap.get(variantId);
-      if (!existing) {
+      if (!matchedVariant) {
         skippedCount++;
         continue;
       }
@@ -431,25 +487,35 @@ export async function importPricingFromSheet({
       const numPrice = parseFloat(rawPrice);
 
       if (isNaN(numPrice) || numPrice < 0) {
-        invalidCount++;
+        // invalid price row
         continue;
       }
 
       // Diffing: check if price changed
-      const priceChanged = parseFloat(existing.marketPrice) !== numPrice;
+      const priceChanged = parseFloat(matchedVariant.marketPrice) !== numPrice;
       const rawCompare = compareAtColIndex !== -1 ? row[compareAtColIndex]?.toString().trim() : null;
       const numCompare = rawCompare ? parseFloat(rawCompare) : null;
 
-      if (priceChanged || (numCompare && numCompare !== parseFloat(existing.compareAtPrice))) {
+      if (priceChanged || (numCompare && numCompare !== parseFloat(matchedVariant.compareAtPrice))) {
         pricesToAdd.push({
-          variantId,
-          productId: existing.productId,
+          variantId: matchedVariant.variantId,
+          productId: matchedVariant.productId,
           price: {
             amount: numPrice.toFixed(2),
             currencyCode: market.currency,
           },
-          ...(numCompare ? { compareAtPrice: { amount: numCompare.toFixed(2) } } : {}),
+          ...(numCompare
+            ? {
+                compareAtPrice: {
+                  amount: numCompare.toFixed(2),
+                  currencyCode: market.currency,
+                },
+              }
+            : {}),
         });
+
+        if (matchType === "SKU") matchedBySkuCount++;
+        else matchedByGidCount++;
       } else {
         skippedCount++;
       }
@@ -473,6 +539,9 @@ export async function importPricingFromSheet({
     } else {
       // Secondary market updates priceList overrides
       if (!market.priceListId) {
+        market.priceListId = await ensureMarketPriceList(admin, market);
+      }
+      if (!market.priceListId) {
         throw new Error(
           `Market "${market.name}" does not have a PriceList enabled yet. In Shopify Admin > Markets > ${market.name} > Pricing, ensure fixed pricing or price adjustments are active.`
         );
@@ -485,7 +554,7 @@ export async function importPricingFromSheet({
       errors = res.errors;
     }
 
-    const summary = `Updated ${successCount} variant prices for "${market.name}". Skipped ${skippedCount} unchanged items. ${invalidCount} invalid rows.`;
+    const summary = `Synced from tab "${tabTitle}" into market "${market.name}". Updated ${successCount} prices (${matchedBySkuCount} matched via SKU, ${matchedByGidCount} matched via Variant ID). Skipped ${skippedCount} unchanged/unmatched.`;
 
     await updateSyncJob(syncJob.id, {
       status: errors.length > 0 ? "PARTIAL_FAILED" : "SUCCESS",
@@ -494,7 +563,7 @@ export async function importPricingFromSheet({
       completed: true,
     });
 
-    return { success: true, summary, errors };
+    return { success: true, summary, errors, matchedBySkuCount, matchedByGidCount };
   } catch (error) {
     console.error("Import pricing error:", error);
     await updateSyncJob(syncJob.id, {

@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { updateGoogleAccessToken } from "../../repository/user.repository";
+import { updateGoogleAccessToken } from "../../repository/user.repository.js";
 
 /**
  * Returns an authenticated Google OAuth2 client for the given GoogleAccount record.

@@ -112,3 +112,13 @@ model SyncJob {
 
   @@index([shop, spreadsheetId])
 }
+
+model StorePlan {
+  id        String   @id @default(uuid())
+  shop      String   @unique
+  plan      String   // "STANDARD" ($11) or "PRO" ($22)
+  chargeId  String?
+  status    String   @default("ACTIVE") // "ACTIVE", "CANCELLED"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

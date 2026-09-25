@@ -1,4 +1,4 @@
-import prisma from "../db.server";
+import prisma from "../db.server.js";
 
 /**
  * Connects or updates a Google account and links it to a Shopify store.

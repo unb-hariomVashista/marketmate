@@ -4,13 +4,17 @@ import { authenticate } from "../shopify.server";
 import { getGoogleAccountByShop } from "../repository/user.repository";
 import { getSheetsByGoogleAccountId } from "../repository/sheet.repository";
 import { getStoreMarketsAndLocations } from "../services/shopify/market.service";
+import { getStorePlan, checkFeatureAccess } from "../services/plan.service";
 import { MultiMarketSyncView } from "../components/sync/MultiMarketSyncView";
 
 export const loader = async ({ request }) => {
-  const { session, admin } = await authenticate.admin(request);
+  const { session, admin, billing } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const googleAccount = await getGoogleAccountByShop(shop);
+  const [googleAccount, storePlan] = await Promise.all([
+    getGoogleAccountByShop(shop),
+    getStorePlan(shop, billing),
+  ]);
 
   if (!googleAccount) {
     // Generate OAuth URL if not connected
@@ -52,6 +56,12 @@ export const loader = async ({ request }) => {
         markets: [],
         locations: [],
         spreadsheets: [],
+        storePlan,
+        planAccess: {
+          allowed: false,
+          reason: "NO_GOOGLE_ACCOUNT",
+          message: "Connect your Google account to begin.",
+        },
       },
       { headers }
     );
@@ -61,6 +71,13 @@ export const loader = async ({ request }) => {
     getSheetsByGoogleAccountId(googleAccount.id, "INVENTORY"),
     getStoreMarketsAndLocations(admin),
   ]);
+
+  const planAccess = checkFeatureAccess({
+    plan: storePlan.plan,
+    type: "INVENTORY",
+    locationsCount: storeData.locations?.length || 0,
+    marketsCount: storeData.markets?.length || 0,
+  });
 
   return Response.json({
     connected: true,
@@ -73,6 +90,8 @@ export const loader = async ({ request }) => {
     locations: storeData.locations,
     spreadsheets: sheets,
     googleOauthUrl: null,
+    storePlan,
+    planAccess,
   });
 };
 
@@ -90,6 +109,8 @@ export default function InventoryPage() {
       locations={data.locations || []}
       shop={data.shop}
       currentShop={data.shop?.myshopifyDomain || ""}
+      storePlan={data.storePlan}
+      planAccess={data.planAccess}
     />
   );
 }

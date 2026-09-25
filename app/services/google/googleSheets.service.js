@@ -1,5 +1,9 @@
 import { google } from "googleapis";
-import { getAuthenticatedOAuthClient } from "./googleAuth.service";
+import { getAuthenticatedOAuthClient } from "./googleAuth.service.js";
+import {
+  getSheetsByGoogleAccountId,
+  upsertSpreadsheet,
+} from "../../repository/sheet.repository.js";
 
 /**
  * Creates a new Google Spreadsheet in the user's Google Drive.
@@ -32,11 +36,79 @@ export async function createSpreadsheet({ googleAccount, title, initialTabTitle 
   const sheetData = response.data;
   const initialSheetId = sheetData.sheets?.[0]?.properties?.sheetId || 0;
 
+  // Make spreadsheet editable by anyone with the link
+  try {
+    const drive = google.drive({ version: "v3", auth });
+    await grantSheetEditPermissions(drive, sheetData.spreadsheetId, googleAccount);
+  } catch (permError) {
+    console.error(
+      "Failed to set permissions on new spreadsheet:",
+      permError.response?.data?.error || permError.message,
+    );
+  }
+
   return {
     spreadsheetId: sheetData.spreadsheetId,
     spreadsheetUrl: sheetData.spreadsheetUrl,
     initialSheetId,
   };
+}
+
+/**
+ * Grants edit permissions to anyone, with fallback to company domain if organization blocks public sharing.
+ */
+async function grantSheetEditPermissions(drive, spreadsheetId, googleAccount) {
+  try {
+    await drive.permissions.create({
+      fileId: spreadsheetId,
+      supportsAllDrives: true,
+      requestBody: {
+        role: "writer",
+        type: "anyone",
+      },
+    });
+    return { success: true, level: "anyone" };
+  } catch (err) {
+    const reason = err.response?.data?.error?.errors?.[0]?.reason;
+    if (reason === "publishOutNotPermitted" && googleAccount?.email) {
+      const emailDomain = googleAccount.email.split("@")[1];
+      if (emailDomain && emailDomain !== "gmail.com") {
+        try {
+          await drive.permissions.create({
+            fileId: spreadsheetId,
+            supportsAllDrives: true,
+            requestBody: {
+              role: "writer",
+              type: "domain",
+              domain: emailDomain,
+            },
+          });
+          return { success: true, level: "domain", domain: emailDomain };
+        } catch (domainErr) {
+          console.error("Domain sharing failed:", domainErr.response?.data?.error || domainErr.message);
+        }
+      }
+    }
+    console.error("Failed to set edit permissions on sheet:", err.response?.data?.error || err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Ensures a spreadsheet has edit permissions.
+ */
+export async function makeSpreadsheetPubliclyEditable({ googleAccount, spreadsheetId }) {
+  try {
+    const auth = await getAuthenticatedOAuthClient(googleAccount);
+    const drive = google.drive({ version: "v3", auth });
+    return await grantSheetEditPermissions(drive, spreadsheetId, googleAccount);
+  } catch (err) {
+    console.error(
+      "Error granting edit permissions to spreadsheet:",
+      err.response?.data?.error || err.message,
+    );
+    return false;
+  }
 }
 
 /**
@@ -77,7 +149,65 @@ export async function ensureTabExists({ googleAccount, spreadsheetId, tabTitle }
     return { sheetId: existingTab.sheetId, created: false };
   }
 
-  // Create new worksheet tab
+  // Look for an initial placeholder tab (e.g. "INVENTORY Overview", "PRICING Overview", "Overview", or "Sheet1")
+  // If it's a fresh sheet or the placeholder tab is empty, overwrite it by renaming it to tabTitle
+  const placeholderTab = info.tabs.find((t) => {
+    const lower = t.title.toLowerCase().trim();
+    return (
+      lower.includes("overview") ||
+      lower === "sheet1" ||
+      lower === "sheet 1"
+    );
+  });
+
+  if (placeholderTab) {
+    let shouldRename = false;
+    if (info.tabs.length === 1) {
+      shouldRename = true;
+    } else {
+      try {
+        const { headers, rows } = await readTabValues({
+          googleAccount,
+          spreadsheetId,
+          tabTitle: placeholderTab.title,
+        });
+        if (headers.length === 0 && rows.length === 0) {
+          shouldRename = true;
+        }
+      } catch {
+        // If cannot read tab, keep shouldRename as false
+      }
+    }
+
+    if (shouldRename) {
+      try {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          resource: {
+            requests: [
+              {
+                updateSheetProperties: {
+                  properties: {
+                    sheetId: placeholderTab.sheetId,
+                    title: tabTitle,
+                  },
+                  fields: "title",
+                },
+              },
+            ],
+          },
+        });
+        return { sheetId: placeholderTab.sheetId, created: false, renamed: true };
+      } catch (renameErr) {
+        console.warn(
+          "Could not rename placeholder tab, falling back to adding new tab:",
+          renameErr.message
+        );
+      }
+    }
+  }
+
+  // Create new worksheet tab if no reusable placeholder tab exists
   const addSheetResponse = await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource: {
@@ -213,4 +343,57 @@ export async function getSpreadsheetModifiedTime({ googleAccount, spreadsheetId 
     console.warn("Could not fetch drive modifiedTime:", error.message);
     return null;
   }
+}
+
+/**
+ * Automatically creates default Inventory and Pricing spreadsheets for a newly connected Google account if none exist.
+ */
+export async function ensureDefaultSheetsForAccount({ googleAccount, shopName = "Store" }) {
+  if (!googleAccount?.id) return [];
+
+  const existingSheets = await getSheetsByGoogleAccountId(googleAccount.id);
+  const hasInventory = existingSheets.some((s) => s.type === "INVENTORY");
+  const hasPricing = existingSheets.some((s) => s.type === "PRICING");
+
+  if (!hasInventory) {
+    try {
+      const title = `${shopName} - Inventory Sheet`;
+      const { spreadsheetId, spreadsheetUrl } = await createSpreadsheet({
+        googleAccount,
+        title,
+        initialTabTitle: "Inventory Overview",
+      });
+      await upsertSpreadsheet({
+        googleAccountId: googleAccount.id,
+        spreadsheetId,
+        spreadsheetUrl,
+        title,
+        type: "INVENTORY",
+      });
+    } catch (err) {
+      console.error("Failed to auto-create inventory sheet:", err.message);
+    }
+  }
+
+  if (!hasPricing) {
+    try {
+      const title = `${shopName} - Pricing Sheet`;
+      const { spreadsheetId, spreadsheetUrl } = await createSpreadsheet({
+        googleAccount,
+        title,
+        initialTabTitle: "Pricing Overview",
+      });
+      await upsertSpreadsheet({
+        googleAccountId: googleAccount.id,
+        spreadsheetId,
+        spreadsheetUrl,
+        title,
+        type: "PRICING",
+      });
+    } catch (err) {
+      console.error("Failed to auto-create pricing sheet:", err.message);
+    }
+  }
+
+  return getSheetsByGoogleAccountId(googleAccount.id);
 }

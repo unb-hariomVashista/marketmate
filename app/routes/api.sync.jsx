@@ -3,6 +3,7 @@ import { getGoogleAccountByShop } from "../repository/user.repository";
 import { getSpreadsheetById } from "../repository/sheet.repository";
 import { getActiveSyncJob } from "../repository/sync.repository";
 import { getStoreMarketsAndLocations } from "../services/shopify/market.service";
+import { getStorePlan, checkFeatureAccess } from "../services/plan.service";
 import {
   exportInventoryToSheet,
   importInventoryFromSheet,
@@ -10,6 +11,8 @@ import {
   importPricingFromSheet,
 } from "../services/syncEngine.service";
 import { readTabValues } from "../services/google/googleSheets.service";
+import { fetchProductsWithInventory } from "../services/shopify/inventory.service";
+import { fetchProductsWithPricing } from "../services/shopify/pricing.service";
 
 /**
  * POST /api/sync
@@ -28,7 +31,7 @@ export const action = async ({ request }) => {
   }
 
   try {
-    const { actionType, spreadsheetId, marketId, locationId } = await request.json();
+    const { actionType, spreadsheetId, marketId, locationId, sourceTabTitle } = await request.json();
 
     const entityId = locationId || marketId;
     if (!actionType || !spreadsheetId || !entityId) {
@@ -64,6 +67,25 @@ export const action = async ({ request }) => {
     // 3. Fetch store markets and locations from Shopify
     const { shop, markets, locations } = await getStoreMarketsAndLocations(admin);
     const isInventoryAction = actionType.includes("INVENTORY");
+
+    // Plan Enforcement Guard
+    const storePlan = await getStorePlan(shopDomain);
+    const planAccess = checkFeatureAccess({
+      plan: storePlan.plan,
+      type: isInventoryAction ? "INVENTORY" : "PRICING",
+      locationsCount: locations.length,
+      marketsCount: markets.length,
+    });
+
+    if (!planAccess.allowed) {
+      return Response.json(
+        {
+          error: planAccess.message,
+          planAccess,
+        },
+        { status: 403 }
+      );
+    }
 
     const targetLocation = isInventoryAction
       ? locations.find((l) => l.id === entityId) || locations[0]
@@ -107,6 +129,8 @@ export const action = async ({ request }) => {
           googleAccount,
           spreadsheet,
           location: targetLocation,
+          locations,
+          sourceTabTitle,
         });
         break;
 
@@ -127,32 +151,108 @@ export const action = async ({ request }) => {
           googleAccount,
           spreadsheet,
           market: targetMarket,
+          sourceTabTitle,
         });
         break;
 
       case "PREVIEW_INVENTORY": {
-        const tabTitle = `${shop.name || "Store"} - ${targetLocation.name} Inventory`.slice(0, 95);
+        const defaultTab = `${shop.name || "Store"} - ${targetLocation.name} Inventory`.slice(0, 95);
+        const tabTitle = sourceTabTitle || defaultTab;
         try {
           const { headers, rows } = await readTabValues({
             googleAccount,
             spreadsheetId: spreadsheet.spreadsheetId,
             tabTitle,
           });
+
+          const skuColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "SKU");
+          const qtyColIndex = headers.findIndex(
+            (h) =>
+              h === "Available Quantity" ||
+              h === "Quantity" ||
+              h === "Qty" ||
+              h.toLowerCase().includes("available") ||
+              h.toLowerCase().includes("qty")
+          );
+
+          // Fetch current store variants to test SKU matching
+          const currentVariants = await fetchProductsWithInventory(admin, [targetLocation.id]);
+          const skuMap = new Map();
+          for (const v of currentVariants) {
+            if (v.sku && v.sku.trim()) {
+              skuMap.set(v.sku.trim().toLowerCase(), v);
+            }
+          }
+          const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
+
+          let skuMatchCount = 0;
+          let gidMatchCount = 0;
+          let unmatchedCount = 0;
+
+          // Compute matching across ALL rows in the sheet for accurate summary
+          for (const row of rows) {
+            const rawVariantId = row[0]?.trim();
+            const rawSku = skuColIndex !== -1 ? row[skuColIndex]?.toString().trim() : "";
+
+            if (rawSku && skuMap.has(rawSku.toLowerCase())) {
+              skuMatchCount++;
+            } else if (rawVariantId && variantMap.has(rawVariantId)) {
+              gidMatchCount++;
+            } else {
+              unmatchedCount++;
+            }
+          }
+
+          const previewRows = rows.slice(0, 20).map((row) => {
+            const rawVariantId = row[0]?.trim();
+            const rawSku = skuColIndex !== -1 ? row[skuColIndex]?.toString().trim() : "";
+            const rawTitle = row[3]?.toString().trim() || "";
+            const incomingQty = qtyColIndex !== -1 ? row[qtyColIndex] : "-";
+
+            let matched = null;
+            let matchType = null;
+
+            if (rawSku && skuMap.has(rawSku.toLowerCase())) {
+              matched = skuMap.get(rawSku.toLowerCase());
+              matchType = "SKU";
+            } else if (rawVariantId && variantMap.has(rawVariantId)) {
+              matched = variantMap.get(rawVariantId);
+              matchType = "VARIANT_ID";
+            }
+
+            const currentQty = matched ? (matched.quantitiesByLocation[targetLocation.id] ?? 0) : "-";
+
+            return [
+              matched?.variantId || rawVariantId || "-",
+              rawSku || (matched?.sku ?? "-"),
+              matched?.productTitle || rawTitle || "Unknown",
+              `${matched ? "Matched by " + matchType : "Not found in store"} • Incoming: ${incomingQty} | Current: ${currentQty}`,
+            ];
+          });
+
           result = {
             preview: {
-              headers,
-              rows: rows.slice(0, 10),
+              headers: ["Target Store Variant ID", "SKU", "Product Title", "Sync Diff Preview"],
+              rows: previewRows,
               totalRows: rows.length,
               tabTitle,
+              summary: {
+                totalInSheet: rows.length,
+                matchedBySku: skuMatchCount,
+                matchedByGid: gidMatchCount,
+                unmatched: unmatchedCount,
+                isCrossStore: skuMatchCount > 0 && gidMatchCount === 0,
+              },
             },
           };
-        } catch {
+        } catch (err) {
           result = {
             preview: {
               headers: [],
               rows: [],
               totalRows: 0,
               tabTitle,
+              error: err.message,
             },
           };
         }
@@ -160,28 +260,108 @@ export const action = async ({ request }) => {
       }
 
       case "PREVIEW_PRICING": {
-        const tabTitle = `${shop.name || "Store"} - ${targetMarket.name} Pricing`.slice(0, 95);
+        const defaultTab = `${shop.name || "Store"} - ${targetMarket.name} Pricing`.slice(0, 95);
+        const tabTitle = sourceTabTitle || defaultTab;
         try {
           const { headers, rows } = await readTabValues({
             googleAccount,
             spreadsheetId: spreadsheet.spreadsheetId,
             tabTitle,
           });
+
+          const skuColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "SKU");
+          let priceColIndex = headers.findIndex((h) =>
+            h.toLowerCase().includes("market price")
+          );
+          if (priceColIndex === -1) {
+            priceColIndex = headers.findIndex((h) =>
+              h.toLowerCase().includes("price") && !h.toLowerCase().includes("compare")
+            );
+          }
+
+          // Fetch current store variants for pricing
+          const currentVariants = await fetchProductsWithPricing(admin, {
+            countryCode: targetMarket.primaryCountryCode,
+            marketId: targetMarket.id,
+            priceListId: targetMarket.priceListId,
+          });
+
+          const skuMap = new Map();
+          for (const v of currentVariants) {
+            if (v.sku && v.sku.trim()) {
+              skuMap.set(v.sku.trim().toLowerCase(), v);
+            }
+          }
+          const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
+
+          let skuMatchCount = 0;
+          let gidMatchCount = 0;
+          let unmatchedCount = 0;
+
+          // Compute matching across ALL rows in the sheet for accurate summary
+          for (const row of rows) {
+            const rawVariantId = row[0]?.trim();
+            const rawSku = skuColIndex !== -1 ? row[skuColIndex]?.toString().trim() : "";
+
+            if (rawSku && skuMap.has(rawSku.toLowerCase())) {
+              skuMatchCount++;
+            } else if (rawVariantId && variantMap.has(rawVariantId)) {
+              gidMatchCount++;
+            } else {
+              unmatchedCount++;
+            }
+          }
+
+          const previewRows = rows.slice(0, 20).map((row) => {
+            const rawVariantId = row[0]?.trim();
+            const rawSku = skuColIndex !== -1 ? row[skuColIndex]?.toString().trim() : "";
+            const rawTitle = row[3]?.toString().trim() || "";
+            const incomingPrice = priceColIndex !== -1 ? row[priceColIndex] : "-";
+
+            let matched = null;
+            let matchType = null;
+
+            if (rawSku && skuMap.has(rawSku.toLowerCase())) {
+              matched = skuMap.get(rawSku.toLowerCase());
+              matchType = "SKU";
+            } else if (rawVariantId && variantMap.has(rawVariantId)) {
+              matched = variantMap.get(rawVariantId);
+              matchType = "VARIANT_ID";
+            }
+
+            const currentPrice = matched ? (matched.marketPrice || matched.price || "-") : "-";
+
+            return [
+              matched?.variantId || rawVariantId || "-",
+              rawSku || (matched?.sku ?? "-"),
+              matched?.productTitle || rawTitle || "Unknown",
+              `${matched ? "Matched by " + matchType : "Not found in store"} • Incoming: ${incomingPrice} | Current: ${currentPrice}`,
+            ];
+          });
+
           result = {
             preview: {
-              headers,
-              rows: rows.slice(0, 10),
+              headers: ["Target Store Variant ID", "SKU", "Product Title", "Sync Diff Preview"],
+              rows: previewRows,
               totalRows: rows.length,
               tabTitle,
+              summary: {
+                totalInSheet: rows.length,
+                matchedBySku: skuMatchCount,
+                matchedByGid: gidMatchCount,
+                unmatched: unmatchedCount,
+                isCrossStore: skuMatchCount > 0 && gidMatchCount === 0,
+              },
             },
           };
-        } catch {
+        } catch (err) {
           result = {
             preview: {
               headers: [],
               rows: [],
               totalRows: 0,
               tabTitle,
+              error: err.message,
             },
           };
         }

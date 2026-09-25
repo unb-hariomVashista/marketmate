@@ -44,12 +44,14 @@ export async function updateSyncJob(id, { status, summary, errorLogs, completed 
  * Checks if there is an ongoing sync job for the given spreadsheet and shop/market.
  */
 export async function getActiveSyncJob({ spreadsheetId, shop, marketId = null }) {
+  const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
   return prisma.syncJob.findFirst({
     where: {
       spreadsheetId,
       shop,
       ...(marketId ? { marketId } : {}),
       status: "IN_PROGRESS",
+      startedAt: { gte: threeMinutesAgo },
     },
     orderBy: { startedAt: "desc" },
   });

@@ -10,13 +10,17 @@ import {
 } from "../repository/user.repository";
 import { getSheetsByGoogleAccountId } from "../repository/sheet.repository";
 import { getRecentSyncJobsByShop } from "../repository/sync.repository";
+import { getStorePlan } from "../services/plan.service";
 
 export const loader = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
   const shop = session.shop;
 
-  // 1. Check if this shop already has a connected Google account
-  const googleAccount = await getGoogleAccountByShop(shop);
+  // 1. Check if this shop already has a connected Google account and current subscription
+  const [googleAccount, storePlan] = await Promise.all([
+    getGoogleAccountByShop(shop),
+    getStorePlan(shop, billing),
+  ]);
 
   if (googleAccount) {
     const [linkedStores, spreadsheets, recentJobs] = await Promise.all([
@@ -36,6 +40,7 @@ export const loader = async ({ request }) => {
       linkedStores,
       spreadsheets,
       recentJobs,
+      storePlan,
       googleOauthUrl: null,
     });
   }
@@ -92,6 +97,7 @@ export default function Index() {
     linkedStores = [],
     spreadsheets = [],
     recentJobs = [],
+    storePlan = null,
   } = useLoaderData();
 
   const isConnected = !!googleAccount;
@@ -105,19 +111,20 @@ export default function Index() {
     window.top.location.href = googleOauthUrl;
   };
 
-  return !isConnected ? (
-    <s-page heading="MarketMate">
-      <UnauthenticatedHome signInHandler={handleGoogleSignIn} />
-    </s-page>
-  ) : (
-    <div className="min-h-screen bg-[#f8fafc] -m-4 sm:-m-6 md:-m-8 p-3 sm:p-5 md:p-8">
-      <AuthenticatedHome
-        googleAccount={googleAccount}
-        currentShop={currentShop}
-        linkedStores={linkedStores}
-        spreadsheets={spreadsheets}
-        recentJobs={recentJobs}
-      />
+  return (
+    <div className="min-h-screen bg-[#f8fafc] w-full overflow-x-hidden p-3 sm:p-5 md:p-6">
+      {!isConnected ? (
+        <UnauthenticatedHome signInHandler={handleGoogleSignIn} />
+      ) : (
+        <AuthenticatedHome
+          googleAccount={googleAccount}
+          currentShop={currentShop}
+          linkedStores={linkedStores}
+          spreadsheets={spreadsheets}
+          recentJobs={recentJobs}
+          storePlan={storePlan}
+        />
+      )}
     </div>
   );
 }

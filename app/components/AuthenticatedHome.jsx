@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useFetcher } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import {
   FileSpreadsheet,
   Check,
@@ -14,6 +15,10 @@ import {
   MoreVertical,
   Clock,
   RefreshCw,
+  User,
+  Sparkles,
+  Plus,
+  X,
 } from "lucide-react";
 
 export const AuthenticatedHome = ({
@@ -22,12 +27,53 @@ export const AuthenticatedHome = ({
   linkedStores = [],
   spreadsheets = [],
   recentJobs = [],
+  storePlan = null,
 }) => {
+  const shopify = useAppBridge();
   const fetcher = useFetcher();
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isCreateSheetModalOpen, setIsCreateSheetModalOpen] = useState(false);
+  const [newSheetType, setNewSheetType] = useState("INVENTORY");
+  const shopName = currentShop?.replace(".myshopify.com", "") || "Store";
+  const [newSheetTitle, setNewSheetTitle] = useState(`${shopName} - Inventory`);
+  const [isSubmittingSheet, setIsSubmittingSheet] = useState(false);
+
+  const handleCreateSheet = async (e) => {
+    e.preventDefault();
+    if (!newSheetTitle.trim()) return;
+    setIsSubmittingSheet(true);
+    try {
+      const res = await fetch("/api/sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newSheetTitle.trim(),
+          type: newSheetType,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        shopify.toast.show(data.error || "Failed to create Google Sheet", {
+          isError: true,
+        });
+      } else {
+        shopify.toast.show("Google Sheet created successfully!");
+        setIsCreateSheetModalOpen(false);
+        window.location.reload();
+      }
+    } catch (err) {
+      shopify.toast.show("Network error creating sheet", { isError: true });
+    } finally {
+      setIsSubmittingSheet(false);
+    }
+  };
 
   const handleDisconnect = () => {
-    if (confirm("Are you sure you want to disconnect your Google account from this store?")) {
+    if (
+      confirm(
+        "Are you sure you want to disconnect your Google account from this store?",
+      )
+    ) {
       setIsDisconnecting(true);
       fetcher.submit({}, { method: "DELETE", action: "/api/google/account" });
     }
@@ -38,26 +84,8 @@ export const AuthenticatedHome = ({
   const userName = googleAccount?.name || "Hariom Vashishta";
   const userEmail = googleAccount?.email || "hariom.vashishta@unbundl.com";
 
-  // Use actual sheets if present, otherwise display default configured sheets matching screenshot
-  const displaySheets =
-    spreadsheets.length > 0
-      ? spreadsheets
-      : [
-          {
-            id: "pricing-default",
-            title: "MarketMate - Pricing",
-            type: "PRICING",
-            spreadsheetUrl: "https://docs.google.com/spreadsheets",
-            tabCount: 3,
-          },
-          {
-            id: "inventory-default",
-            title: "Inventory Sheet",
-            type: "INVENTORY",
-            spreadsheetUrl: "https://docs.google.com/spreadsheets",
-            tabCount: 3,
-          },
-        ];
+  // Display actual sheets belonging to this connected Google account
+  const displaySheets = spreadsheets;
 
   // Helper for human-readable time format
   const formatTimeAgo = (dateString) => {
@@ -82,48 +110,6 @@ export const AuthenticatedHome = ({
 
   return (
     <div className="max-w-6xl mx-auto px-2 sm:px-4 py-3 font-sans text-gray-900 space-y-6">
-      {/* ========================================================= */}
-      {/* 1. TOP APP HEADER (MarketMate Brand, Help & User Dropdown) */}
-      {/* ========================================================= */}
-      <div className="flex items-center justify-between py-2.5 px-4 sm:px-6 bg-white border border-gray-200/80 rounded-2xl shadow-2xs">
-        {/* Brand Logo */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-xs bg-gradient-to-tr from-[#00b4d8] to-[#06d6a0] p-1.5">
-            {/* Custom stylized 'M' logo */}
-            <svg className="w-full h-full text-white" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 19V5a2 2 0 0 1 3.4-1.4L12 8.2l4.6-4.6A2 2 0 0 1 20 5v14a2 2 0 1 1-4 0V9.8l-3.3 3.3a1 1 0 0 1-1.4 0L8 9.8V19a2 2 0 1 1-4 0Z" />
-            </svg>
-          </div>
-          <span className="font-extrabold text-base text-gray-950 tracking-tight">
-            MarketMate
-          </span>
-        </div>
-
-        {/* Right: Help & User Dropdown */}
-        <div className="flex items-center gap-2.5">
-          <a
-            href="mailto:support@marketmate.io"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-full text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors shadow-2xs"
-          >
-            <HelpCircle className="w-3.5 h-3.5 text-gray-400" />
-            <span>Help</span>
-          </a>
-
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full border border-gray-200 bg-white hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer">
-            <div className="w-6 h-6 rounded-full bg-slate-600 text-white text-xs font-bold flex items-center justify-center uppercase">
-              {userName[0]}
-            </div>
-            <span className="text-xs font-bold text-gray-800 hidden sm:inline">
-              {userName}
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* 2. GOOGLE ACCOUNT PROFILE BAR                             */}
-      {/* ========================================================= */}
       <div className="bg-white border border-gray-200/80 rounded-2xl p-4 sm:p-5 shadow-2xs flex items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           {googleAccount?.pictureUrl ? (
@@ -143,29 +129,61 @@ export const AuthenticatedHome = ({
                   e.currentTarget.style.display = "none";
                 }}
               />
-              <span className="text-2xl">🐱</span>
+              <User className="w-5 h-5 text-gray-500" />
             </div>
           )}
 
           <div className="space-y-0.5">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-sm font-bold text-gray-950">{userName}</h2>
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#ecfdf5] text-[#059669] border border-[#a7f3d0]">
                 <Check className="w-3 h-3 stroke-[3]" /> Connected
               </span>
+              {storePlan?.plan === "PRO" ? (
+                <a
+                  href="/app/plans?returnTo=/app"
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 transition-colors shadow-2xs"
+                >
+                  <Sparkles className="w-3 h-3 text-emerald-700" /> Pro Plan ($22/mo)
+                </a>
+              ) : storePlan?.plan === "STANDARD" ? (
+                <a
+                  href="/app/plans?returnTo=/app"
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-colors shadow-2xs"
+                >
+                  Standard Plan ($11/mo)
+                </a>
+              ) : (
+                <a
+                  href="/app/plans?returnTo=/app"
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors shadow-2xs"
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-700" /> Select Plan ($11 or $22)
+                </a>
+              )}
             </div>
             <p className="text-xs text-gray-400">{userEmail}</p>
           </div>
         </div>
 
-        <button
-          onClick={handleDisconnect}
-          disabled={isDisconnecting}
-          className="inline-flex items-center gap-2 px-3.5 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer"
-        >
-          <LogOut className="w-3.5 h-3.5 text-gray-500" />
-          <span>{isDisconnecting ? "Disconnecting..." : "Disconnect Google"}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/app/plans?returnTo=/app"
+            className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs"
+          >
+            <span>Subscription</span>
+          </a>
+          <button
+            onClick={handleDisconnect}
+            disabled={isDisconnecting}
+            className="inline-flex items-center gap-2 px-3.5 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5 text-gray-500" />
+            <span>
+              {isDisconnecting ? "Disconnecting..." : "Disconnect Google"}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* ========================================================= */}
@@ -198,7 +216,8 @@ export const AuthenticatedHome = ({
                   Multi-Market Inventory
                 </h3>
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  Export and synchronize inventory levels for each market and fulfillment location via dedicated sheet tabs.
+                  Export and synchronize inventory levels for each market and
+                  fulfillment location via dedicated sheet tabs.
                 </p>
               </div>
             </div>
@@ -237,36 +256,100 @@ export const AuthenticatedHome = ({
                   <svg className="w-24 h-20" viewBox="0 0 96 80" fill="none">
                     {/* Top Box */}
                     <g transform="translate(28, 6)">
-                      <path d="M20 0L40 8L20 16L0 8L20 0Z" fill="#FDE68A" stroke="#D97706" strokeWidth="1" />
+                      <path
+                        d="M20 0L40 8L20 16L0 8L20 0Z"
+                        fill="#FDE68A"
+                        stroke="#D97706"
+                        strokeWidth="1"
+                      />
                       <path d="M20 3L36 9L20 15L4 9L20 3Z" fill="#FBBF24" />
-                      <path d="M16 2L24 5L24 14L16 11Z" fill="#B45309" opacity="0.4" />
-                      <path d="M0 8L20 16V34L0 26V8Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
-                      <path d="M20 16L40 8V26L20 34V16Z" fill="#D97706" stroke="#B45309" strokeWidth="1" />
+                      <path
+                        d="M16 2L24 5L24 14L16 11Z"
+                        fill="#B45309"
+                        opacity="0.4"
+                      />
+                      <path
+                        d="M0 8L20 16V34L0 26V8Z"
+                        fill="#F59E0B"
+                        stroke="#D97706"
+                        strokeWidth="1"
+                      />
+                      <path
+                        d="M20 16L40 8V26L20 34V16Z"
+                        fill="#D97706"
+                        stroke="#B45309"
+                        strokeWidth="1"
+                      />
                     </g>
 
                     {/* Bottom Left Box */}
                     <g transform="translate(6, 30)">
-                      <path d="M20 0L40 8L20 16L0 8L20 0Z" fill="#FDE68A" stroke="#D97706" strokeWidth="1" />
+                      <path
+                        d="M20 0L40 8L20 16L0 8L20 0Z"
+                        fill="#FDE68A"
+                        stroke="#D97706"
+                        strokeWidth="1"
+                      />
                       <path d="M20 3L36 9L20 15L4 9L20 3Z" fill="#FBBF24" />
-                      <path d="M16 2L24 5L24 14L16 11Z" fill="#B45309" opacity="0.4" />
-                      <path d="M0 8L20 16V36L0 28V8Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
-                      <path d="M20 16L40 8V28L20 36V16Z" fill="#D97706" stroke="#B45309" strokeWidth="1" />
+                      <path
+                        d="M16 2L24 5L24 14L16 11Z"
+                        fill="#B45309"
+                        opacity="0.4"
+                      />
+                      <path
+                        d="M0 8L20 16V36L0 28V8Z"
+                        fill="#F59E0B"
+                        stroke="#D97706"
+                        strokeWidth="1"
+                      />
+                      <path
+                        d="M20 16L40 8V28L20 36V16Z"
+                        fill="#D97706"
+                        stroke="#B45309"
+                        strokeWidth="1"
+                      />
                     </g>
 
                     {/* Bottom Right Box */}
                     <g transform="translate(46, 30)">
-                      <path d="M20 0L40 8L20 16L0 8L20 0Z" fill="#FDE68A" stroke="#D97706" strokeWidth="1" />
+                      <path
+                        d="M20 0L40 8L20 16L0 8L20 0Z"
+                        fill="#FDE68A"
+                        stroke="#D97706"
+                        strokeWidth="1"
+                      />
                       <path d="M20 3L36 9L20 15L4 9L20 3Z" fill="#FBBF24" />
-                      <path d="M16 2L24 5L24 14L16 11Z" fill="#B45309" opacity="0.4" />
-                      <path d="M0 8L20 16V36L0 28V8Z" fill="#F59E0B" stroke="#D97706" strokeWidth="1" />
-                      <path d="M20 16L40 8V28L20 36V16Z" fill="#D97706" stroke="#B45309" strokeWidth="1" />
+                      <path
+                        d="M16 2L24 5L24 14L16 11Z"
+                        fill="#B45309"
+                        opacity="0.4"
+                      />
+                      <path
+                        d="M0 8L20 16V36L0 28V8Z"
+                        fill="#F59E0B"
+                        stroke="#D97706"
+                        strokeWidth="1"
+                      />
+                      <path
+                        d="M20 16L40 8V28L20 36V16Z"
+                        fill="#D97706"
+                        stroke="#B45309"
+                        strokeWidth="1"
+                      />
                     </g>
                   </svg>
 
                   {/* Floating Green Sheets Badge with Sync arrows */}
                   <div className="absolute -top-1 -right-1 bg-white border border-gray-100 rounded-lg p-1.5 shadow-md flex items-center gap-1">
                     <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                    <svg className="w-3 h-3 text-emerald-600 animate-spin" style={{ animationDuration: '4s' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <svg
+                      className="w-3 h-3 text-emerald-600 animate-spin"
+                      style={{ animationDuration: "4s" }}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
                       <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                     </svg>
                   </div>
@@ -276,9 +359,11 @@ export const AuthenticatedHome = ({
 
             {/* Stats Row */}
             <div className="bg-[#f8fafc] border border-gray-100 rounded-xl p-3 px-4 flex items-center justify-between text-xs">
-              <span className="text-gray-500 font-medium">Active Inventory Sheets</span>
+              <span className="text-gray-500 font-medium">
+                Active Inventory Sheets
+              </span>
               <span className="font-extrabold text-gray-900">
-                {inventorySheets.length || 1} sheet(s) configured
+                {inventorySheets.length} sheet(s) configured
               </span>
             </div>
           </div>
@@ -318,7 +403,8 @@ export const AuthenticatedHome = ({
                   Multi-Market Pricing
                 </h3>
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  Manage localized currency overrides and PriceLists per market with automatic row validation and protected product IDs.
+                  Manage localized currency overrides and PriceLists per market
+                  with automatic row validation and protected product IDs.
                 </p>
               </div>
             </div>
@@ -356,32 +442,125 @@ export const AuthenticatedHome = ({
                   {/* SVG Pricing Card */}
                   <svg className="w-26 h-20" viewBox="0 0 92 68" fill="none">
                     {/* Background Pricing Sheet */}
-                    <rect x="18" y="4" width="70" height="60" rx="8" fill="white" stroke="#E0E7FF" strokeWidth="1.5" />
-                    <rect x="18" y="4" width="70" height="14" rx="8" fill="#EEF2FF" />
+                    <rect
+                      x="18"
+                      y="4"
+                      width="70"
+                      height="60"
+                      rx="8"
+                      fill="white"
+                      stroke="#E0E7FF"
+                      strokeWidth="1.5"
+                    />
+                    <rect
+                      x="18"
+                      y="4"
+                      width="70"
+                      height="14"
+                      rx="8"
+                      fill="#EEF2FF"
+                    />
 
                     {/* Row 1 ($ Green) */}
                     <circle cx="28" cy="27" r="4.5" fill="#10B981" />
-                    <text x="26" y="30" fontSize="7" fill="white" fontWeight="bold">$</text>
-                    <rect x="36" y="25" width="22" height="4" rx="2" fill="#E2E8F0" />
-                    <rect x="64" y="25" width="18" height="4" rx="2" fill="#CBD5E1" />
+                    <text
+                      x="26"
+                      y="30"
+                      fontSize="7"
+                      fill="white"
+                      fontWeight="bold"
+                    >
+                      $
+                    </text>
+                    <rect
+                      x="36"
+                      y="25"
+                      width="22"
+                      height="4"
+                      rx="2"
+                      fill="#E2E8F0"
+                    />
+                    <rect
+                      x="64"
+                      y="25"
+                      width="18"
+                      height="4"
+                      rx="2"
+                      fill="#CBD5E1"
+                    />
 
                     {/* Row 2 (€ Blue) */}
                     <circle cx="28" cy="39" r="4.5" fill="#3B82F6" />
-                    <text x="26" y="42" fontSize="7" fill="white" fontWeight="bold">€</text>
-                    <rect x="36" y="37" width="22" height="4" rx="2" fill="#E2E8F0" />
-                    <rect x="64" y="37" width="18" height="4" rx="2" fill="#CBD5E1" />
+                    <text
+                      x="26"
+                      y="42"
+                      fontSize="7"
+                      fill="white"
+                      fontWeight="bold"
+                    >
+                      €
+                    </text>
+                    <rect
+                      x="36"
+                      y="37"
+                      width="22"
+                      height="4"
+                      rx="2"
+                      fill="#E2E8F0"
+                    />
+                    <rect
+                      x="64"
+                      y="37"
+                      width="18"
+                      height="4"
+                      rx="2"
+                      fill="#CBD5E1"
+                    />
 
                     {/* Row 3 (£ Orange) */}
                     <circle cx="28" cy="51" r="4.5" fill="#F59E0B" />
-                    <text x="26" y="54" fontSize="7" fill="white" fontWeight="bold">£</text>
-                    <rect x="36" y="49" width="22" height="4" rx="2" fill="#E2E8F0" />
-                    <rect x="64" y="49" width="18" height="4" rx="2" fill="#CBD5E1" />
+                    <text
+                      x="26"
+                      y="54"
+                      fontSize="7"
+                      fill="white"
+                      fontWeight="bold"
+                    >
+                      £
+                    </text>
+                    <rect
+                      x="36"
+                      y="49"
+                      width="22"
+                      height="4"
+                      rx="2"
+                      fill="#E2E8F0"
+                    />
+                    <rect
+                      x="64"
+                      y="49"
+                      width="18"
+                      height="4"
+                      rx="2"
+                      fill="#CBD5E1"
+                    />
 
                     {/* Floating Purple Price Tag on the left */}
                     <g transform="translate(0, 16) rotate(-15)">
-                      <path d="M22 6L14 0H4C2.89543 0 2 0.895431 2 2V12L10 18L22 6Z" fill="#4F46E5" />
+                      <path
+                        d="M22 6L14 0H4C2.89543 0 2 0.895431 2 2V12L10 18L22 6Z"
+                        fill="#4F46E5"
+                      />
                       <circle cx="6" cy="6" r="1.5" fill="white" />
-                      <text x="7" y="14" fontSize="8" fill="white" fontWeight="bold">$</text>
+                      <text
+                        x="7"
+                        y="14"
+                        fontSize="8"
+                        fill="white"
+                        fontWeight="bold"
+                      >
+                        $
+                      </text>
                     </g>
                   </svg>
                 </div>
@@ -390,9 +569,11 @@ export const AuthenticatedHome = ({
 
             {/* Stats Row */}
             <div className="bg-[#f8fafc] border border-gray-100 rounded-xl p-3 px-4 flex items-center justify-between text-xs">
-              <span className="text-gray-500 font-medium">Active Pricing Sheets</span>
+              <span className="text-gray-500 font-medium">
+                Active Pricing Sheets
+              </span>
               <span className="font-extrabold text-gray-900">
-                {pricingSheets.length || 1} sheet(s) configured
+                {pricingSheets.length} sheet(s) configured
               </span>
             </div>
           </div>
@@ -415,93 +596,106 @@ export const AuthenticatedHome = ({
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-700">
-              <FileSpreadsheet className="w-4 h-4" />
-            </div>
             <h3 className="text-sm sm:text-base font-bold text-gray-950">
               Connected Google Spreadsheets
             </h3>
           </div>
-
-          <a
-            href="https://drive.google.com"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-50 bg-white transition-colors shadow-2xs"
+          <button
+            type="button"
+            onClick={() => {
+              setNewSheetTitle(`${shopName} - Inventory`);
+              setNewSheetType("INVENTORY");
+              setIsCreateSheetModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer"
           >
-            <span>Open in Google Drive</span>
-            <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
-          </a>
+            <Plus className="w-3.5 h-3.5" />
+            <span>Create Spreadsheet</span>
+          </button>
         </div>
 
         {/* Spreadsheet List */}
-        <div className="divide-y divide-gray-100 border-t border-gray-100 pt-1">
-          {displaySheets.map((sheet) => {
-            const isPricing = sheet.type === "PRICING";
-            return (
-              <div
-                key={sheet.id}
-                className="py-3.5 flex items-center justify-between gap-4 hover:bg-gray-50/60 px-2 rounded-xl transition-colors"
+        <div className="border-t border-gray-100 pt-1">
+          {displaySheets.length === 0 ? (
+            <div className="py-8 text-center space-y-3">
+              <FileSpreadsheet className="w-8 h-8 text-gray-300 mx-auto" />
+              <p className="text-xs font-semibold text-gray-700">
+                No Google Spreadsheets connected yet for this account.
+              </p>
+              <p className="text-[11px] text-gray-400 max-w-sm mx-auto">
+                Create an Inventory or Pricing spreadsheet to begin syncing your store data across markets.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewSheetTitle(`${shopName} - Inventory`);
+                  setNewSheetType("INVENTORY");
+                  setIsCreateSheetModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer mt-1"
               >
-                {/* Left: Icon + Type Badge + Title & Market count */}
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center shrink-0">
-                    <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create New Sheet</span>
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {displaySheets.map((sheet) => {
+                const isPricing = sheet.type === "PRICING";
+                return (
+                  <div
+                    key={sheet.id}
+                    className="py-3.5 flex items-center justify-between gap-4 hover:bg-gray-50/60 px-2 rounded-xl transition-colors"
+                  >
+                    {/* Left: Icon + Type Badge + Title & Market count */}
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center shrink-0">
+                        <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
+                          isPricing
+                            ? "bg-[#eef2ff] text-[#4f46e5]"
+                            : "bg-[#ecfdf5] text-[#059669] border border-emerald-200/50"
+                        }`}
+                      >
+                        {sheet.type}
+                      </span>
+
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-bold text-gray-900">
+                          {sheet.title}
+                        </h4>
+                        <p className="text-[11px] text-gray-400">
+                          {sheet.tabs?.length || 0} market tab(s) configured
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Right: Open in Google Sheets + More Menu */}
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={sheet.spreadsheetUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-50 bg-white transition-colors shadow-2xs"
+                      >
+                        <span>Open in Google Sheets</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                      </a>
+                    </div>
                   </div>
-
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider ${
-                      isPricing
-                        ? "bg-[#eef2ff] text-[#4f46e5]"
-                        : "bg-[#ecfdf5] text-[#059669] border border-emerald-200/50"
-                    }`}
-                  >
-                    {sheet.type}
-                  </span>
-
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-gray-900">{sheet.title}</h4>
-                    <p className="text-[11px] text-gray-400">
-                      {sheet.tabs?.length || sheet.tabCount || 3} market tab(s) configured
-                    </p>
-                  </div>
-                </div>
-
-                {/* Right: Open in Google Sheets + More Menu */}
-                <div className="flex items-center gap-2">
-                  <a
-                    href={sheet.spreadsheetUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-50 bg-white transition-colors shadow-2xs"
-                  >
-                    <span>Open in Google Sheets</span>
-                    <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-
-                  <button
-                    type="button"
-                    className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                  >
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
-
-      {/* ========================================================= */}
-      {/* 5. RECENT SYNC ACTIVITY LOGS SECTION                       */}
-      {/* ========================================================= */}
       <div className="bg-white border border-gray-200/90 rounded-3xl p-6 sm:p-7 shadow-xs space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-700">
-              <Clock className="w-4 h-4" />
-            </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm sm:text-base font-bold text-gray-950">
@@ -514,7 +708,8 @@ export const AuthenticatedHome = ({
                 )}
               </div>
               <p className="text-xs text-gray-400">
-                Track recent data synchronization events between Shopify and Google Sheets
+                Track recent data synchronization events between Shopify and
+                Google Sheets
               </p>
             </div>
           </div>
@@ -534,16 +729,20 @@ export const AuthenticatedHome = ({
             <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center mx-auto text-slate-400 border border-slate-100">
               <Clock className="w-5 h-5" />
             </div>
-            <p className="text-xs font-semibold text-gray-700">No sync operations recorded yet</p>
+            <p className="text-xs font-semibold text-gray-700">
+              No sync operations recorded yet
+            </p>
             <p className="text-[11px] text-gray-400 max-w-sm mx-auto">
-              Whenever you export or import inventory or pricing from the tabs above, detailed run logs and record counts will be recorded here.
+              Whenever you export or import inventory or pricing from the tabs
+              above, detailed run logs and record counts will be recorded here.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100 border-t border-gray-100 pt-1">
             {recentJobs.map((job) => {
               const isSuccess = job.status === "SUCCESS";
-              const isFailed = job.status === "FAILED" || job.status === "PARTIAL_FAILED";
+              const isFailed =
+                job.status === "FAILED" || job.status === "PARTIAL_FAILED";
               const isPricing = job.type === "PRICING";
               const isExport = job.direction === "SHOPIFY_TO_SHEET";
 
@@ -585,7 +784,8 @@ export const AuthenticatedHome = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-gray-400">
-                        {job.summary || `${job.recordsProcessed || 0} items processed`}
+                        {job.summary ||
+                          `${job.recordsProcessed || 0} items processed`}
                       </p>
                     </div>
                   </div>
@@ -608,6 +808,105 @@ export const AuthenticatedHome = ({
           </div>
         )}
       </div>
+
+      {/* ========================================================= */}
+      {/* 5. CREATE GOOGLE SPREADSHEET MODAL                       */}
+      {/* ========================================================= */}
+      {isCreateSheetModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-200 space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
+                  <FileSpreadsheet className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-gray-900">
+                  Create Google Spreadsheet
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreateSheetModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSheet} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1.5">
+                  Spreadsheet Type:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewSheetType("INVENTORY");
+                      setNewSheetTitle(`${shopName} - Inventory`);
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold text-center cursor-pointer transition-colors ${
+                      newSheetType === "INVENTORY"
+                        ? "bg-emerald-50 border-emerald-600 text-emerald-900 shadow-2xs"
+                        : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Inventory
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewSheetType("PRICING");
+                      setNewSheetTitle(`${shopName} - Pricing`);
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold text-center cursor-pointer transition-colors ${
+                      newSheetType === "PRICING"
+                        ? "bg-indigo-50 border-indigo-600 text-indigo-900 shadow-2xs"
+                        : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    Pricing
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">
+                  Spreadsheet Title:
+                </label>
+                <input
+                  type="text"
+                  value={newSheetTitle}
+                  onChange={(e) => setNewSheetTitle(e.target.value)}
+                  required
+                  placeholder="e.g. My Store - Inventory"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  This spreadsheet will be created in your connected Google Drive account and configured with full edit permissions.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateSheetModalOpen(false)}
+                  className="px-3.5 py-1.5 border border-gray-300 rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingSheet || !newSheetTitle.trim()}
+                  className="px-4 py-1.5 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold shadow-xs disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmittingSheet ? "Creating..." : "Create Spreadsheet"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
