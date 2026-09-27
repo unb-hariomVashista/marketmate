@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useFetcher } from "react-router";
+import { Link, useFetcher, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import {
   FileSpreadsheet,
@@ -31,6 +31,7 @@ export const AuthenticatedHome = ({
 }) => {
   const shopify = useAppBridge();
   const fetcher = useFetcher();
+  const revalidator = useRevalidator();
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isCreateSheetModalOpen, setIsCreateSheetModalOpen] = useState(false);
   const [newSheetType, setNewSheetType] = useState("INVENTORY");
@@ -59,7 +60,7 @@ export const AuthenticatedHome = ({
       } else {
         shopify.toast.show("Google Sheet created successfully!");
         setIsCreateSheetModalOpen(false);
-        window.location.reload();
+        revalidator.revalidate();
       }
     } catch (err) {
       shopify.toast.show("Network error creating sheet", { isError: true });
@@ -81,8 +82,8 @@ export const AuthenticatedHome = ({
 
   const pricingSheets = spreadsheets.filter((s) => s.type === "PRICING");
   const inventorySheets = spreadsheets.filter((s) => s.type === "INVENTORY");
-  const userName = googleAccount?.name || "Hariom Vashishta";
-  const userEmail = googleAccount?.email || "hariom.vashishta@unbundl.com";
+  const userName = googleAccount?.name || (googleAccount?.email ? googleAccount.email.split("@")[0] : "Google Account");
+  const userEmail = googleAccount?.email || "";
 
   // Display actual sheets belonging to this connected Google account
   const displaySheets = spreadsheets;

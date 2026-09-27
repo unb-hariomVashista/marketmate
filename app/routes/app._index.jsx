@@ -1,4 +1,4 @@
-import { redirect, useFetcher, useLoaderData } from "react-router";
+import { useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -11,6 +11,7 @@ import {
 import { getSheetsByGoogleAccountId } from "../repository/sheet.repository";
 import { getRecentSyncJobsByShop } from "../repository/sync.repository";
 import { getStorePlan } from "../services/plan.service";
+import { generateGoogleOAuthUrlAndHeaders } from "../services/google/googleAuth.service";
 
 export const loader = async ({ request }) => {
   const { session, billing } = await authenticate.admin(request);
@@ -46,46 +47,12 @@ export const loader = async ({ request }) => {
   }
 
   // 2. If not connected, generate state and Google OAuth URL
-  const state = crypto.randomUUID();
-  const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
-  const options = {
-    redirect_uri: process.env.GOOGLE_REDIRECT_URI,
-    client_id: process.env.GOOGLE_CLIENT_ID,
-    access_type: 'offline',
-    response_type: 'code',
-    prompt: 'consent',
-    scope: [
-      "openid",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/userinfo.profile",
-      "https://www.googleapis.com/auth/spreadsheets",
-      "https://www.googleapis.com/auth/drive.file",
-    ].join(' '),
-    state
-  };
-
-  const qs = new URLSearchParams(options).toString();
-  const googleOauthUrl = `${rootUrl}?${qs}`;
-
-  const headers = new Headers();
-  headers.append(
-    "Set-Cookie",
-    `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=3600`
-  );
-
-  headers.append(
-    "Set-Cookie",
-    `oauth_shop=${shop}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=3600`
-  );
+  const { googleOauthUrl, headers } = generateGoogleOAuthUrlAndHeaders(shop);
 
   return Response.json(
     { googleOauthUrl, googleAccount: null },
     { headers }
   );
-};
-
-export const action = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
 };
 
 export default function Index() {

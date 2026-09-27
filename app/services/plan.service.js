@@ -20,37 +20,13 @@ export const PLAN_LIMITS = {
 
 /**
  * Updates or sets the store's current plan in DB.
- * Uses Prisma Client model if available, falling back to raw SQLite query.
  */
 export async function setStorePlan(shop, planKey, chargeId = null) {
-  if (prisma.storePlan) {
-    return await prisma.storePlan.upsert({
-      where: { shop },
-      update: { plan: planKey, status: "ACTIVE", chargeId },
-      create: { shop, plan: planKey, status: "ACTIVE", chargeId },
-    });
-  }
-
-  try {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO StorePlan (id, shop, plan, chargeId, status, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)
-       ON CONFLICT(shop) DO UPDATE SET plan = ?, chargeId = ?, status = 'ACTIVE', updatedAt = ?`,
-      id,
-      shop,
-      planKey,
-      chargeId,
-      now,
-      now,
-      planKey,
-      chargeId,
-      now
-    );
-  } catch (err) {
-    console.warn("StorePlan execute fallback warning:", err.message);
-  }
+  return prisma.storePlan.upsert({
+    where: { shop },
+    update: { plan: planKey, status: "ACTIVE", chargeId },
+    create: { shop, plan: planKey, status: "ACTIVE", chargeId },
+  });
 }
 
 /**
@@ -84,23 +60,10 @@ export async function getStorePlan(shop, billing = null) {
     }
   }
 
-  // Database lookup (safe against Prisma client cache mismatch)
-  let record = null;
-  if (prisma.storePlan) {
-    record = await prisma.storePlan.findUnique({
-      where: { shop },
-    });
-  } else {
-    try {
-      const rows = await prisma.$queryRawUnsafe(
-        `SELECT * FROM StorePlan WHERE shop = ? LIMIT 1`,
-        shop
-      );
-      record = rows && rows[0] ? rows[0] : null;
-    } catch (err) {
-      console.warn("StorePlan query fallback warning:", err.message);
-    }
-  }
+  // Database lookup
+  const record = await prisma.storePlan.findUnique({
+    where: { shop },
+  });
 
   if (record && record.status === "ACTIVE" && (record.plan === "PRO" || record.plan === "STANDARD")) {
     return {

@@ -69,7 +69,7 @@ export const action = async ({ request }) => {
   }
 
   const selectedPlanName = planKey === "PRO" ? PLAN_PRO : PLAN_STANDARD;
-  const apiKey = process.env.SHOPIFY_API_KEY || "599a19cf88962122adcc38c482c7bf20";
+  const apiKey = process.env.SHOPIFY_API_KEY;
   const returnUrl = `https://${shop}/admin/apps/${apiKey}/app`;
 
   try {

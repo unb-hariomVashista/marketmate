@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import {
   ArrowDown,
@@ -36,6 +37,8 @@ export function MultiMarketSyncView({
   planAccess = null,
 }) {
   const shopify = useAppBridge();
+  const navigate = useNavigate();
+  const revalidator = useRevalidator();
 
   const isInventory = type === "INVENTORY";
   const items = isInventory ? locations : markets;
@@ -91,7 +94,7 @@ export function MultiMarketSyncView({
     if (googleOauthUrl) {
       window.top.location.href = googleOauthUrl;
     } else {
-      window.location.href = "/app";
+      navigate("/app");
     }
   };
 
@@ -135,7 +138,7 @@ export function MultiMarketSyncView({
         });
       } else {
         shopify.toast.show("Google Sheet created successfully!");
-        window.location.reload();
+        revalidator.revalidate();
       }
     } catch (err) {
       shopify.toast.show("Network error creating sheet", { isError: true });
@@ -1365,7 +1368,11 @@ export function MultiMarketSyncView({
                       <div className="pt-3 flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={() => window.location.reload()}
+                          onClick={() => {
+                            revalidator.revalidate();
+                            setCurrentStep(1);
+                            setSyncResult(null);
+                          }}
                           className="px-4 py-2 bg-[#044e3d] hover:bg-[#033c2e] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
                           Done / Refresh View

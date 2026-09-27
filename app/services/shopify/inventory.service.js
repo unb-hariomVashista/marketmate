@@ -3,7 +3,7 @@ import crypto from "crypto";
 /**
  * Fetches products, variants, and their inventory levels across specific locations.
  */
-export async function fetchProductsWithInventory(admin, _locationIds = []) {
+export async function fetchProductsWithInventory(admin) {
   const query = `#graphql
     query GetVariantsWithInventory($cursor: String) {
       productVariants(first: 50, after: $cursor) {
@@ -85,8 +85,11 @@ export async function fetchProductsWithInventory(admin, _locationIds = []) {
     hasNextPage = data.data?.productVariants?.pageInfo?.hasNextPage || false;
     cursor = data.data?.productVariants?.pageInfo?.endCursor || null;
 
-    // Safety limit: if > 1000 items in dev, avoid excessive pagination
-    if (allVariants.length >= 1000) break;
+    // Safety limit: avoid unbounded pagination in very large stores
+    if (allVariants.length >= 2500) {
+      console.warn("Reached maximum variants pagination cap (2500) for inventory.");
+      break;
+    }
   }
 
   return allVariants;

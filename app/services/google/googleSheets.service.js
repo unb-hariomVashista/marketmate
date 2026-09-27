@@ -285,10 +285,11 @@ export async function writeTabValues({
 
   const values = [headers, ...rows];
 
-  // 1. Clear existing contents of the sheet tab to prevent orphan rows
+  // 1. Clear existing contents of the sheet tab within data columns to prevent orphan rows
+  const colLetter = String.fromCharCode(64 + Math.min(Math.max(headers.length, 7), 26));
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
-    range: `'${tabTitle}'!A1:ZZ`,
+    range: `'${tabTitle}'!A1:${colLetter}`,
   });
 
   // 2. Batch update cell values

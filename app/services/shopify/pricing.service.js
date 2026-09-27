@@ -5,7 +5,7 @@ import crypto from "crypto";
  */
 export async function fetchProductsWithPricing(
   admin,
-  { countryCode = null, marketId: _marketId = null, priceListId: _priceListId = null } = {}
+  { countryCode = null } = {}
 ) {
   const queryWithContext = `#graphql
     query GetVariantsWithContextualPricing($cursor: String, $context: ContextualPricingContext!) {
@@ -102,7 +102,10 @@ export async function fetchProductsWithPricing(
 
     hasNextPage = data.data?.productVariants?.pageInfo?.hasNextPage || false;
     cursor = data.data?.productVariants?.pageInfo?.endCursor || null;
-    if (allVariants.length >= 1000) break;
+    if (allVariants.length >= 2500) {
+      console.warn("Reached maximum variants pagination cap (2500).");
+      break;
+    }
   }
 
   return allVariants;
@@ -318,28 +321,35 @@ export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
 
   let successCount = 0;
   const errors = [];
+  const productEntries = Array.from(byProduct.entries());
+  const CONCURRENCY = 5;
 
-  for (const [productId, variants] of byProduct.entries()) {
-    try {
-      const response = await admin.graphql(mutation, {
-        variables: { productId, variants, idempotencyKey: crypto.randomUUID() },
-      });
-      const data = await response.json();
+  for (let i = 0; i < productEntries.length; i += CONCURRENCY) {
+    const batch = productEntries.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async ([productId, variants]) => {
+        try {
+          const response = await admin.graphql(mutation, {
+            variables: { productId, variants, idempotencyKey: crypto.randomUUID() },
+          });
+          const data = await response.json();
 
-      if (data.errors && data.errors.length > 0) {
-        errors.push(...data.errors.map((e) => e.message));
-        continue;
-      }
+          if (data.errors && data.errors.length > 0) {
+            errors.push(...data.errors.map((e) => e.message));
+            return;
+          }
 
-      const userErrors = data.data?.productVariantsBulkUpdate?.userErrors || [];
-      if (userErrors.length > 0) {
-        errors.push(...userErrors.map((e) => e.message));
-      } else {
-        successCount += variants.length;
-      }
-    } catch (err) {
-      errors.push(err.message);
-    }
+          const userErrors = data.data?.productVariantsBulkUpdate?.userErrors || [];
+          if (userErrors.length > 0) {
+            errors.push(...userErrors.map((e) => e.message));
+          } else {
+            successCount += variants.length;
+          }
+        } catch (err) {
+          errors.push(err.message);
+        }
+      })
+    );
   }
 
   return { successCount, errors };
