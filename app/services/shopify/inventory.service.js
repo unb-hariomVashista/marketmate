@@ -107,6 +107,16 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
     return { successCount: 0, errors: [] };
   }
 
+  // Deduplicate by inventoryItemId + locationId (Shopify strictly requires uniqueness per mutation)
+  const uniqueMap = new Map();
+  for (const item of quantityInputs) {
+    if (item?.inventoryItemId && item?.locationId) {
+      const key = `${item.inventoryItemId}:${item.locationId}`;
+      uniqueMap.set(key, item);
+    }
+  }
+  const sanitizedInputs = Array.from(uniqueMap.values());
+
   const mutation = `#graphql
     mutation SetInventoryQuantities($input: InventorySetQuantitiesInput!) {
       inventorySetQuantities(input: $input) {
@@ -125,8 +135,8 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
   let successCount = 0;
   const errors = [];
 
-  for (let i = 0; i < quantityInputs.length; i += CHUNK_SIZE) {
-    const chunk = quantityInputs.slice(i, i + CHUNK_SIZE);
+  for (let i = 0; i < sanitizedInputs.length; i += CHUNK_SIZE) {
+    const chunk = sanitizedInputs.slice(i, i + CHUNK_SIZE);
 
     try {
       const response = await admin.graphql(mutation, {

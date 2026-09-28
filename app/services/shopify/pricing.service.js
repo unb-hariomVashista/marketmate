@@ -209,6 +209,15 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
     return { successCount: 0, errors: [] };
   }
 
+  // Deduplicate by variantId (Shopify mandates unique variants in pricesToAdd)
+  const uniqueMap = new Map();
+  for (const item of pricesToAdd) {
+    if (item?.variantId) {
+      uniqueMap.set(item.variantId, item);
+    }
+  }
+  const sanitizedPrices = Array.from(uniqueMap.values());
+
   const mutation = `#graphql
     mutation UpdatePriceListPrices(
       $priceListId: ID!
@@ -237,9 +246,9 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
   let successCount = 0;
   const errors = [];
 
-  for (let i = 0; i < pricesToAdd.length; i += CHUNK_SIZE) {
+  for (let i = 0; i < sanitizedPrices.length; i += CHUNK_SIZE) {
     // Sanitize chunk to ONLY valid PriceListPriceInput fields (variantId, price, compareAtPrice)
-    const chunk = pricesToAdd.slice(i, i + CHUNK_SIZE).map((p) => {
+    const chunk = sanitizedPrices.slice(i, i + CHUNK_SIZE).map((p) => {
       const item = {
         variantId: p.variantId,
         price: p.price,
@@ -289,13 +298,14 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
 export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
   if (variantPrices.length === 0) return { successCount: 0, errors: [] };
 
+  // Deduplicate by productId -> variantId
   const byProduct = new Map();
   for (const item of variantPrices) {
-    if (!item.productId) continue;
+    if (!item.productId || !item.variantId) continue;
     if (!byProduct.has(item.productId)) {
-      byProduct.set(item.productId, []);
+      byProduct.set(item.productId, new Map());
     }
-    byProduct.get(item.productId).push({
+    byProduct.get(item.productId).set(item.variantId, {
       id: item.variantId,
       price: item.price,
       ...(item.compareAtPrice ? { compareAtPrice: item.compareAtPrice } : {}),
@@ -318,7 +328,10 @@ export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
 
   let successCount = 0;
   const errors = [];
-  const productEntries = Array.from(byProduct.entries());
+  const productEntries = Array.from(byProduct.entries()).map(([productId, variantMap]) => [
+    productId,
+    Array.from(variantMap.values()),
+  ]);
   const CONCURRENCY = 5;
 
   for (let i = 0; i < productEntries.length; i += CONCURRENCY) {

@@ -201,7 +201,7 @@ export async function importInventoryFromSheet({
     // Fallback: Variant ID lookup (same-store mapping)
     const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
 
-    const quantitiesToUpdate = [];
+    const quantitiesMap = new Map();
     let matchedBySkuCount = 0;
     let matchedByGidCount = 0;
     let skippedCount = 0;
@@ -238,18 +238,22 @@ export async function importInventoryFromSheet({
       const currentQty = matchedVariant.quantitiesByLocation[targetLocation.id] ?? 0;
       // Diffing: only update if changed
       if (newQty !== currentQty) {
-        quantitiesToUpdate.push({
+        const key = `${matchedVariant.inventoryItemId}:${targetLocation.id}`;
+        if (!quantitiesMap.has(key)) {
+          if (matchType === "SKU") matchedBySkuCount++;
+          else matchedByGidCount++;
+        }
+        quantitiesMap.set(key, {
           inventoryItemId: matchedVariant.inventoryItemId,
           locationId: targetLocation.id,
           quantity: newQty,
         });
-
-        if (matchType === "SKU") matchedBySkuCount++;
-        else matchedByGidCount++;
       } else {
         skippedCount++;
       }
     }
+
+    const quantitiesToUpdate = Array.from(quantitiesMap.values());
 
     // 3. Batch apply to Shopify
     const { successCount, errors } = await batchUpdateInventoryQuantities(
@@ -451,7 +455,7 @@ export async function importPricingFromSheet({
     // Fallback: Variant ID lookup (same-store mapping)
     const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
 
-    const pricesToAdd = [];
+    const pricesMap = new Map();
     let matchedBySkuCount = 0;
     let matchedByGidCount = 0;
     let skippedCount = 0;
@@ -491,7 +495,11 @@ export async function importPricingFromSheet({
       const numCompare = rawCompare ? parseFloat(rawCompare) : null;
 
       if (priceChanged || (numCompare && numCompare !== parseFloat(matchedVariant.compareAtPrice))) {
-        pricesToAdd.push({
+        if (!pricesMap.has(matchedVariant.variantId)) {
+          if (matchType === "SKU") matchedBySkuCount++;
+          else matchedByGidCount++;
+        }
+        pricesMap.set(matchedVariant.variantId, {
           variantId: matchedVariant.variantId,
           productId: matchedVariant.productId,
           price: {
@@ -507,13 +515,12 @@ export async function importPricingFromSheet({
               }
             : {}),
         });
-
-        if (matchType === "SKU") matchedBySkuCount++;
-        else matchedByGidCount++;
       } else {
         skippedCount++;
       }
     }
+
+    const pricesToAdd = Array.from(pricesMap.values());
 
     let successCount = 0;
     let errors = [];

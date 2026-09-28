@@ -167,7 +167,7 @@ export const AuthenticatedHome = ({
               </span>
               {storePlan?.plan?.toLowerCase() === "pro" ? (
                 <a
-                  href="/app/plans"
+                  href="/app/plans?view=true"
                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 transition-colors shadow-2xs"
                 >
                   <Sparkles className="w-3 h-3 text-emerald-700" /> Pro Plan ($22/mo)
@@ -201,7 +201,7 @@ export const AuthenticatedHome = ({
         <div className="flex items-center gap-2">
           {storePlan?.hasActivePayment ? (
             <a
-              href="/app/plans"
+              href="/app/plans?view=true"
               className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs"
             >
               <span>Subscription</span>
