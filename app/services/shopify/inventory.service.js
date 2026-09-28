@@ -134,11 +134,11 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
           input: {
             name: "available",
             reason: "correction",
+            ignoreCompareQuantity: true,
             quantities: chunk.map((item) => ({
               inventoryItemId: item.inventoryItemId,
               locationId: item.locationId,
               quantity: parseInt(item.quantity, 10),
-              changeFromQuantity: null,
             })),
           },
         },
