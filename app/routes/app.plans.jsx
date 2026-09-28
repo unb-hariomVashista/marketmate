@@ -132,6 +132,14 @@ export default function PlansPage() {
         });
         setSubscribingKey(null);
       }
+    } catch (err) {
+      shopify.toast.show("Network error initiating subscription", {
+        isError: true,
+      });
+      setSubscribingKey(null);
+    }
+  };
+
   const [isCancelling, setIsCancelling] = useState(false);
 
   const handleCancelSubscription = async () => {
