@@ -156,8 +156,8 @@ export async function ensureMarketPriceList(admin, market) {
   }
 
   const createMutation = `#graphql
-    mutation CreatePriceListForMarket($input: PriceListCreateInput!, $idempotencyKey: String!) {
-      priceListCreate(input: $input) @idempotent(key: $idempotencyKey) {
+    mutation CreatePriceListForMarket($input: PriceListCreateInput!) {
+      priceListCreate(input: $input) {
         priceList {
           id
         }
@@ -183,7 +183,6 @@ export async function ensureMarketPriceList(admin, market) {
             },
           },
         },
-        idempotencyKey: crypto.randomUUID(),
       },
     });
     const createData = await createRes.json();
@@ -215,13 +214,12 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
       $priceListId: ID!
       $pricesToAdd: [PriceListPriceInput!]!
       $variantIdsToDelete: [ID!]!
-      $idempotencyKey: String!
     ) {
       priceListFixedPricesUpdate(
         priceListId: $priceListId
         pricesToAdd: $pricesToAdd
         variantIdsToDelete: $variantIdsToDelete
-      ) @idempotent(key: $idempotencyKey) {
+      ) {
         prices {
           price {
             amount
@@ -258,7 +256,6 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
           priceListId,
           pricesToAdd: chunk,
           variantIdsToDelete: [],
-          idempotencyKey: crypto.randomUUID(),
         },
       });
 
@@ -306,8 +303,8 @@ export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
   }
 
   const mutation = `#graphql
-    mutation UpdateBasePrices($productId: ID!, $variants: [ProductVariantsBulkInput!]!, $idempotencyKey: String!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) @idempotent(key: $idempotencyKey) {
+    mutation UpdateBasePrices($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
         productVariants {
           id
         }
@@ -330,7 +327,7 @@ export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
       batch.map(async ([productId, variants]) => {
         try {
           const response = await admin.graphql(mutation, {
-            variables: { productId, variants, idempotencyKey: crypto.randomUUID() },
+            variables: { productId, variants },
           });
           const data = await response.json();
 

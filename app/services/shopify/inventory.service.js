@@ -108,8 +108,8 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
   }
 
   const mutation = `#graphql
-    mutation SetInventoryQuantities($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
-      inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
+    mutation SetInventoryQuantities($input: InventorySetQuantitiesInput!) {
+      inventorySetQuantities(input: $input) {
         inventoryAdjustmentGroup {
           reason
         }
@@ -141,7 +141,6 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
               changeFromQuantity: null,
             })),
           },
-          idempotencyKey: crypto.randomUUID(),
         },
       });
 
