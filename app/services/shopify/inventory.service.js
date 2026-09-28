@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { executeGraphQLWithRetry } from "./graphqlClient";
 
 /**
  * Fetches products, variants, and their inventory levels across specific locations.
@@ -49,8 +50,7 @@ export async function fetchProductsWithInventory(admin, locationIds = []) {
   const targetLocSet = Array.isArray(locationIds) && locationIds.length > 0 ? new Set(locationIds) : null;
 
   while (hasNextPage) {
-    const response = await admin.graphql(query, { variables: { cursor } });
-    const data = await response.json();
+    const data = await executeGraphQLWithRetry(admin, query, { variables: { cursor } });
 
     if (data.errors) {
       throw new Error(data.errors.map((e) => e.message).join(", "));
@@ -131,7 +131,7 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
     }
   `;
 
-  const CHUNK_SIZE = 100;
+  const CHUNK_SIZE = 50;
   let successCount = 0;
   const errors = [];
 
@@ -139,7 +139,7 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
     const chunk = sanitizedInputs.slice(i, i + CHUNK_SIZE);
 
     try {
-      const response = await admin.graphql(mutation, {
+      const data = await executeGraphQLWithRetry(admin, mutation, {
         variables: {
           input: {
             name: "available",
@@ -153,8 +153,6 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
           },
         },
       });
-
-      const data = await response.json();
 
       if (data.errors && data.errors.length > 0) {
         const topErrors = data.errors.map((e) => e.message).join(", ");
@@ -175,6 +173,11 @@ export async function batchUpdateInventoryQuantities(admin, quantityInputs) {
     } catch (err) {
       console.error("Inventory update chunk failure:", err);
       errors.push(err.message);
+    }
+
+    // Give Shopify GraphQL rate-limit bucket breathing room between batches
+    if (i + CHUNK_SIZE < sanitizedInputs.length) {
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
 

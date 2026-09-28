@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { executeGraphQLWithRetry } from "./graphqlClient";
 
 /**
  * Fetches all products with base variant prices, along with market-specific prices via Shopify's contextualPricing API.
@@ -75,8 +76,7 @@ export async function fetchProductsWithPricing(
       variables.context = { country: countryCode };
     }
 
-    const response = await admin.graphql(useQuery, { variables });
-    const data = await response.json();
+    const data = await executeGraphQLWithRetry(admin, useQuery, { variables });
 
     if (data.errors) {
       throw new Error(data.errors.map((e) => e.message).join(", "));
@@ -118,40 +118,53 @@ export async function ensureMarketPriceList(admin, market) {
   if (market.priceListId) return market.priceListId;
 
   let catalogId = market.catalogId;
-  if (!catalogId) {
-    const marketQuery = `#graphql
-      query GetMarketCatalog($id: ID!) {
-        market(id: $id) {
-          catalogs(first: 5) {
-            nodes {
+
+  // Always query the market's catalogs to ensure we have the latest PriceList association
+  const marketQuery = `#graphql
+    query GetMarketCatalogDetails($id: ID!) {
+      market(id: $id) {
+        id
+        name
+        catalogs(first: 10) {
+          nodes {
+            id
+            title
+            status
+            priceList {
               id
-              priceList {
-                id
-              }
+              name
+              currency
             }
           }
         }
       }
-    `;
-    try {
-      const res = await admin.graphql(marketQuery, { variables: { id: market.id } });
-      const data = await res.json();
-      const cat =
-        data.data?.market?.catalogs?.nodes?.find((c) => c.priceList?.id) ||
-        data.data?.market?.catalogs?.nodes?.[0];
-      if (cat?.priceList?.id) {
-        market.priceListId = cat.priceList.id;
-        return cat.priceList.id;
-      }
-      if (cat?.id) {
-        catalogId = cat.id;
-      }
-    } catch (e) {
-      console.warn("Could not query market catalog:", e.message);
     }
+  `;
+
+  try {
+    const data = await executeGraphQLWithRetry(admin, marketQuery, { variables: { id: market.id } });
+    const catalogNodes = data.data?.market?.catalogs?.nodes || [];
+
+    // 1. Look for any catalog that already has an active priceList
+    const catWithPriceList = catalogNodes.find((c) => c.priceList?.id);
+    if (catWithPriceList?.priceList?.id) {
+      market.priceListId = catWithPriceList.priceList.id;
+      market.catalogId = catWithPriceList.id;
+      return catWithPriceList.priceList.id;
+    }
+
+    // 2. If no priceList yet, select the first active/available catalog for this market
+    const targetCatalog = catalogNodes.find((c) => c.status === "ACTIVE") || catalogNodes[0];
+    if (targetCatalog?.id) {
+      catalogId = targetCatalog.id;
+      market.catalogId = targetCatalog.id;
+    }
+  } catch (e) {
+    console.warn("Could not query market catalogs:", e.message);
   }
 
   if (!catalogId) {
+    console.error(`No catalog found for market ${market.name} (${market.id})`);
     return null;
   }
 
@@ -170,7 +183,7 @@ export async function ensureMarketPriceList(admin, market) {
   `;
 
   try {
-    const createRes = await admin.graphql(createMutation, {
+    const createData = await executeGraphQLWithRetry(admin, createMutation, {
       variables: {
         input: {
           name: `${market.name} Price List`,
@@ -185,7 +198,6 @@ export async function ensureMarketPriceList(admin, market) {
         },
       },
     });
-    const createData = await createRes.json();
     const createdId = createData.data?.priceListCreate?.priceList?.id;
     if (createdId) {
       market.priceListId = createdId;
@@ -202,7 +214,7 @@ export async function ensureMarketPriceList(admin, market) {
 }
 
 /**
- * Updates prices on a Shopify Market PriceList in chunks of up to 100.
+ * Updates prices on a Shopify Market PriceList in chunks of up to 50.
  */
 export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [] }) {
   if (!priceListId || pricesToAdd.length === 0) {
@@ -242,7 +254,7 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
     }
   `;
 
-  const CHUNK_SIZE = 100;
+  const CHUNK_SIZE = 50;
   let successCount = 0;
   const errors = [];
 
@@ -260,15 +272,13 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
     });
 
     try {
-      const response = await admin.graphql(mutation, {
+      const data = await executeGraphQLWithRetry(admin, mutation, {
         variables: {
           priceListId,
           pricesToAdd: chunk,
           variantIdsToDelete: [],
         },
       });
-
-      const data = await response.json();
 
       if (data.errors && data.errors.length > 0) {
         errors.push(...data.errors.map((e) => e.message));
@@ -286,6 +296,10 @@ export async function batchUpdatePriceList(admin, { priceListId, pricesToAdd = [
     } catch (err) {
       console.error("PriceList update failure:", err);
       errors.push(err.message);
+    }
+
+    if (i + CHUNK_SIZE < sanitizedPrices.length) {
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
 
@@ -332,17 +346,16 @@ export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
     productId,
     Array.from(variantMap.values()),
   ]);
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 2;
 
   for (let i = 0; i < productEntries.length; i += CONCURRENCY) {
     const batch = productEntries.slice(i, i + CONCURRENCY);
     await Promise.all(
       batch.map(async ([productId, variants]) => {
         try {
-          const response = await admin.graphql(mutation, {
+          const data = await executeGraphQLWithRetry(admin, mutation, {
             variables: { productId, variants },
           });
-          const data = await response.json();
 
           if (data.errors && data.errors.length > 0) {
             errors.push(...data.errors.map((e) => e.message));
@@ -360,6 +373,10 @@ export async function batchUpdateBaseVariantPrices(admin, variantPrices = []) {
         }
       })
     );
+
+    if (i + CONCURRENCY < productEntries.length) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
   }
 
   return { successCount, errors };

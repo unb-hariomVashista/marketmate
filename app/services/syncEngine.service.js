@@ -16,6 +16,12 @@ import {
 } from "./shopify/pricing.service";
 import { upsertSheetTab, updateTabLastSynced } from "../repository/sheet.repository";
 import { createSyncJob, updateSyncJob } from "../repository/sync.repository";
+import {
+  computeInventoryRowHash,
+  computePricingRowHash,
+  getStoredTabHashes,
+  saveStoredTabHashes,
+} from "./cache/syncHash.service";
 
 /**
  * EXPORT: Shopify Inventory -> Google Sheet tab (by Warehouse / Location)
@@ -101,7 +107,19 @@ export async function exportInventoryToSheet({
     });
     await updateTabLastSynced(tab.id);
 
-    // 8. Update sync job
+    // 8. Store row hashes for Git-diff syncing
+    const initialHashes = {};
+    for (const v of variants) {
+      const idKey = v.sku?.trim() || v.variantId;
+      const qty = v.quantitiesByLocation[targetLocation.id] ?? 0;
+      const hash = computeInventoryRowHash(idKey, qty);
+      initialHashes[idKey] = hash;
+      if (v.variantId) initialHashes[v.variantId] = hash;
+      if (v.sku?.trim()) initialHashes[v.sku.trim()] = hash;
+    }
+    await saveStoredTabHashes(shop.myshopifyDomain, tabTitle, initialHashes, false);
+
+    // 9. Update sync job
     await updateSyncJob(syncJob.id, {
       status: "SUCCESS",
       summary: `Exported ${variants.length} variants for warehouse "${targetLocation.name}" to tab "${tabTitle}".`,
@@ -183,7 +201,10 @@ export async function importInventoryFromSheet({
       );
     }
 
-    // 2. Fetch current inventory of target store to match by SKU / Variant ID and compare diffs
+    // 2. Load stored hashes to detect which rows actually changed (Git-diff style)
+    const storedHashes = await getStoredTabHashes(shop.myshopifyDomain, tabTitle);
+
+    // 3. Fetch current inventory of target store to match by SKU / Variant ID and compare diffs
     const queryLocations =
       locations && locations.length > 0 ? locations.map((l) => l.id) : [targetLocation.id];
     const currentVariants = await fetchProductsWithInventory(
@@ -202,6 +223,7 @@ export async function importInventoryFromSheet({
     const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
 
     const quantitiesMap = new Map();
+    const newHashesToSave = {};
     let matchedBySkuCount = 0;
     let matchedByGidCount = 0;
     let skippedCount = 0;
@@ -235,6 +257,14 @@ export async function importInventoryFromSheet({
         continue;
       }
 
+      // Git-diff hash check
+      const identifier = rawSku || rawVariantId;
+      const currentHash = computeInventoryRowHash(identifier, newQty);
+      if (storedHashes && storedHashes[identifier] === currentHash) {
+        skippedCount++;
+        continue;
+      }
+
       const currentQty = matchedVariant.quantitiesByLocation[targetLocation.id] ?? 0;
       // Diffing: only update if changed
       if (newQty !== currentQty) {
@@ -248,18 +278,42 @@ export async function importInventoryFromSheet({
           locationId: targetLocation.id,
           quantity: newQty,
         });
+
+        if (identifier) newHashesToSave[identifier] = currentHash;
+        if (matchedVariant.variantId) newHashesToSave[matchedVariant.variantId] = currentHash;
+        if (matchedVariant.sku) newHashesToSave[matchedVariant.sku] = currentHash;
       } else {
         skippedCount++;
+        // If Shopify already matches this quantity, record hash so next sync skips instantly
+        if (identifier) newHashesToSave[identifier] = currentHash;
       }
     }
 
     const quantitiesToUpdate = Array.from(quantitiesMap.values());
 
-    // 3. Batch apply to Shopify
+    if (quantitiesToUpdate.length === 0) {
+      if (Object.keys(newHashesToSave).length > 0) {
+        await saveStoredTabHashes(shop.myshopifyDomain, tabTitle, newHashesToSave, true);
+      }
+      const summary = `Synced from tab "${tabTitle}". All inventory quantities match Google Sheets (0 rows needed updating).`;
+      await updateSyncJob(syncJob.id, {
+        status: "SUCCESS",
+        summary,
+        completed: true,
+      });
+      return { success: true, summary, errors: [], matchedBySkuCount: 0, matchedByGidCount: 0 };
+    }
+
+    // 4. Batch apply to Shopify
     const { successCount, errors } = await batchUpdateInventoryQuantities(
       admin,
       quantitiesToUpdate
     );
+
+    // Save updated hashes for synced items
+    if (Object.keys(newHashesToSave).length > 0) {
+      await saveStoredTabHashes(shop.myshopifyDomain, tabTitle, newHashesToSave, true);
+    }
 
     const summary = `Synced from tab "${tabTitle}" into "${targetLocation.name}". Updated ${successCount} entries (${matchedBySkuCount} matched via SKU, ${matchedByGidCount} matched via Variant ID). Skipped ${skippedCount} unchanged/unmatched.`;
 
@@ -366,7 +420,17 @@ export async function exportPricingToSheet({
     });
     await updateTabLastSynced(tab.id);
 
-    // 8. Update sync job
+    // 8. Store row hashes for Git-diff syncing
+    const initialHashes = {};
+    for (const v of variants) {
+      const idKey = v.variantId;
+      const hash = computePricingRowHash(idKey, v.marketPrice, v.compareAtPrice);
+      initialHashes[idKey] = hash;
+      if (v.sku?.trim()) initialHashes[v.sku.trim()] = hash;
+    }
+    await saveStoredTabHashes(shop.myshopifyDomain, tabTitle, initialHashes, false);
+
+    // 9. Update sync job
     await updateSyncJob(syncJob.id, {
       status: "SUCCESS",
       summary: `Exported ${variants.length} products to tab "${tabTitle}" in currency ${market.currency}.`,
@@ -438,7 +502,10 @@ export async function importPricingFromSheet({
       throw new Error(`Could not find a price column in sheet tab "${tabTitle}". Headers found: ${headers.join(", ")}`);
     }
 
-    // 2. Fetch current prices in target store for diffing and matching
+    // 2. Load stored hashes to detect which rows actually changed (Git-diff style)
+    const storedHashes = await getStoredTabHashes(shop.myshopifyDomain, tabTitle);
+
+    // 3. Fetch current prices in target store for diffing and matching
     const currentVariants = await fetchProductsWithPricing(admin, {
       countryCode: market.primaryCountryCode,
       marketId: market.id,
@@ -456,6 +523,7 @@ export async function importPricingFromSheet({
     const variantMap = new Map(currentVariants.map((v) => [v.variantId, v]));
 
     const pricesMap = new Map();
+    const newHashesToSave = {};
     let matchedBySkuCount = 0;
     let matchedByGidCount = 0;
     let skippedCount = 0;
@@ -489,10 +557,19 @@ export async function importPricingFromSheet({
         continue;
       }
 
-      // Diffing: check if price changed
-      const priceChanged = parseFloat(matchedVariant.marketPrice) !== numPrice;
       const rawCompare = compareAtColIndex !== -1 ? row[compareAtColIndex]?.toString().trim() : null;
       const numCompare = rawCompare ? parseFloat(rawCompare) : null;
+
+      // Git-diff hash check
+      const identifier = matchedVariant.variantId || rawSku;
+      const currentHash = computePricingRowHash(identifier, numPrice, numCompare);
+      if (storedHashes && storedHashes[identifier] === currentHash) {
+        skippedCount++;
+        continue;
+      }
+
+      // Diffing: check if price changed
+      const priceChanged = parseFloat(matchedVariant.marketPrice) !== numPrice;
 
       if (priceChanged || (numCompare && numCompare !== parseFloat(matchedVariant.compareAtPrice))) {
         if (!pricesMap.has(matchedVariant.variantId)) {
@@ -515,17 +592,36 @@ export async function importPricingFromSheet({
               }
             : {}),
         });
+
+        if (identifier) newHashesToSave[identifier] = currentHash;
+        if (matchedVariant.variantId) newHashesToSave[matchedVariant.variantId] = currentHash;
+        if (matchedVariant.sku) newHashesToSave[matchedVariant.sku] = currentHash;
       } else {
         skippedCount++;
+        // If Shopify already matches this price, record hash so next sync skips instantly
+        if (identifier) newHashesToSave[identifier] = currentHash;
       }
     }
 
     const pricesToAdd = Array.from(pricesMap.values());
 
+    if (pricesToAdd.length === 0) {
+      if (Object.keys(newHashesToSave).length > 0) {
+        await saveStoredTabHashes(shop.myshopifyDomain, tabTitle, newHashesToSave, true);
+      }
+      const summary = `Synced from tab "${tabTitle}". All prices match Google Sheets (0 prices needed updating).`;
+      await updateSyncJob(syncJob.id, {
+        status: "SUCCESS",
+        summary,
+        completed: true,
+      });
+      return { success: true, summary, errors: [], matchedBySkuCount: 0, matchedByGidCount: 0 };
+    }
+
     let successCount = 0;
     let errors = [];
 
-    // 3. Batch apply updates
+    // 4. Batch apply updates
     if (market.primary) {
       // Primary market updates base variant prices directly
       const basePrices = pricesToAdd.map((p) => ({
@@ -553,6 +649,11 @@ export async function importPricingFromSheet({
       });
       successCount = res.successCount;
       errors = res.errors;
+    }
+
+    // Save updated hashes for synced items
+    if (Object.keys(newHashesToSave).length > 0) {
+      await saveStoredTabHashes(shop.myshopifyDomain, tabTitle, newHashesToSave, true);
     }
 
     const summary = `Synced from tab "${tabTitle}" into market "${market.name}". Updated ${successCount} prices (${matchedBySkuCount} matched via SKU, ${matchedByGidCount} matched via Variant ID). Skipped ${skippedCount} unchanged/unmatched.`;
