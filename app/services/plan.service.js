@@ -44,7 +44,7 @@ export async function setStorePlan(shop, planKey, chargeId = null) {
 }
 
 export const isBillingTestMode = () =>
-  process.env.SHOPIFY_BILLING_TEST === "true" || process.env.NODE_ENV !== "production";
+  process.env.SHOPIFY_BILLING_TEST !== "false";
 
 /**
  * Retrieves the store's current subscription plan.

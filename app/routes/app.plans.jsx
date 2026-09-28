@@ -132,11 +132,26 @@ export default function PlansPage() {
         });
         setSubscribingKey(null);
       }
-    } catch (err) {
-      shopify.toast.show("Network error initiating subscription", {
-        isError: true,
-      });
-      setSubscribingKey(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  const handleCancelSubscription = async () => {
+    if (!confirm("Are you sure you want to cancel your MarketMate subscription?")) {
+      return;
+    }
+    setIsCancelling(true);
+    try {
+      const res = await fetch("/api/billing/cancel", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        shopify.toast.show("Subscription cancelled successfully.");
+        window.location.reload();
+      } else {
+        shopify.toast.show(data.error || "Failed to cancel subscription", { isError: true });
+      }
+    } catch {
+      shopify.toast.show("Error cancelling subscription", { isError: true });
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -302,11 +317,21 @@ export default function PlansPage() {
           <div className="shrink-0 flex items-center gap-2">
             <span className="text-xs text-gray-500">Active Plan:</span>
             {currentPlan ? (
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                {currentPlan === "pro" || currentPlan === "PRO"
-                  ? "Pro Plan ($22/mo)"
-                  : "Standard Plan ($11/mo)"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  {currentPlan === "pro" || currentPlan === "PRO"
+                    ? "Pro Plan ($22/mo)"
+                    : "Standard Plan ($11/mo)"}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCancelSubscription}
+                  disabled={isCancelling}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-red-600 border border-red-200 hover:bg-red-50 transition-colors cursor-pointer"
+                >
+                  {isCancelling ? "Cancelling..." : "Cancel"}
+                </button>
+              </div>
             ) : (
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
                 No Active Plan
