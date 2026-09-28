@@ -1,5 +1,5 @@
 import { authenticate } from "../shopify.server";
-import { PLAN_STANDARD, PLAN_PRO, isBillingTestMode } from "../services/plan.service";
+import { PLAN_STANDARD, PLAN_PRO, shouldChargeInTestMode } from "../services/plan.service";
 import { getStoreMarketsAndLocations } from "../services/shopify/market.service";
 import { getBillingReturnUrl } from "./app.plans";
 
@@ -44,6 +44,7 @@ export const action = async ({ request }) => {
   const planName = normalizedKey === "pro" ? PLAN_PRO : PLAN_STANDARD;
   const price = normalizedKey === "pro" ? 22 : 11;
   const returnUrl = getBillingReturnUrl(shop, returnTo);
+  const isTest = await shouldChargeInTestMode(admin);
 
   try {
     const response = await admin.graphql(
@@ -65,7 +66,7 @@ export const action = async ({ request }) => {
         variables: {
           name: planName,
           returnUrl,
-          test: isBillingTestMode(),
+          test: isTest,
           lineItems: [
             {
               plan: {

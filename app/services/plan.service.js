@@ -47,16 +47,66 @@ export const isBillingTestMode = () =>
   process.env.SHOPIFY_BILLING_TEST !== "false";
 
 /**
+ * Automatically determines if billing should run in test mode:
+ * 1. Forced true if SHOPIFY_BILLING_TEST === "true"
+ * 2. Forced false if SHOPIFY_BILLING_TEST === "false"
+ * 3. Automatic: true for partner development stores & reviewers, false for real merchant stores
+ */
+export async function shouldChargeInTestMode(admin) {
+  if (process.env.SHOPIFY_BILLING_TEST === "true") {
+    return true;
+  }
+  if (process.env.SHOPIFY_BILLING_TEST === "false") {
+    return false;
+  }
+
+  if (!admin) return true;
+
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query getShopPlanDetails {
+        shop {
+          plan {
+            partnerDevelopment
+          }
+        }
+      }`
+    );
+    const json = await response.json();
+    const isPartnerDev = json?.data?.shop?.plan?.partnerDevelopment === true;
+    return isPartnerDev;
+  } catch (err) {
+    console.warn("Could not determine partnerDevelopment status, defaulting to test mode:", err?.message);
+    return true;
+  }
+}
+
+/**
  * Retrieves the store's current subscription plan.
- * Checks Shopify Billing API first, falling back to database records.
+ * Checks Shopify Billing API first (supporting both test and live charges), falling back to database records.
  */
 export async function getStorePlan(shop, billing = null) {
   if (billing) {
     try {
-      const billingCheck = await billing.check({
+      // First check with test mode
+      let billingCheck = await billing.check({
         plans: [PLAN_STANDARD, PLAN_PRO],
-        isTest: isBillingTestMode(),
+        isTest: true,
       });
+
+      // If no active payment found, check live subscriptions
+      if (!billingCheck.hasActivePayment) {
+        try {
+          const liveCheck = await billing.check({
+            plans: [PLAN_STANDARD, PLAN_PRO],
+            isTest: false,
+          });
+          if (liveCheck.hasActivePayment) {
+            billingCheck = liveCheck;
+          }
+        } catch {}
+      }
 
       if (billingCheck.hasActivePayment && billingCheck.appSubscriptions?.length > 0) {
         const activeSub = billingCheck.appSubscriptions[0];
