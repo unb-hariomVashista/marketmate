@@ -76,7 +76,10 @@ export const action = async ({ request }) => {
   if (request.method === "DELETE") {
     try {
       const { id } = await request.json();
-      await deleteSpreadsheet(id);
+      if (!id) {
+        return Response.json({ error: "Spreadsheet ID is required" }, { status: 400 });
+      }
+      await deleteSpreadsheet(id, googleAccount.id);
       return Response.json({ success: true });
     } catch (error) {
       return Response.json({ error: error.message }, { status: 500 });

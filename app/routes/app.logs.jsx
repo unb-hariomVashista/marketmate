@@ -12,9 +12,7 @@ import {
   ExternalLink,
   Search,
   FileSpreadsheet,
-  Boxes,
   TrendingUp,
-  ArrowRight,
   ChevronDown,
   ChevronUp,
   Layers,
@@ -60,7 +58,7 @@ export const loader = async ({ request }) => {
 };
 
 export default function LogsPage() {
-  const { jobs = [], stats, shop } = useLoaderData();
+  const { jobs = [], stats } = useLoaderData();
   const revalidator = useRevalidator();
 
   // Filter states
@@ -251,7 +249,15 @@ export default function LogsPage() {
               return (
                 <div key={job.id} className="transition-colors hover:bg-gray-50/60">
                   <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleExpand(job.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpand(job.id);
+                      }
+                    }}
                     className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer"
                   >
                     {/* Status & Basic Info */}

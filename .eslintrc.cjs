@@ -86,6 +86,7 @@ module.exports = {
         "**/*.server.{js,ts}",
         "app/services/**/*.{js,ts}",
         "app/repository/**/*.{js,ts}",
+        "app/routes/**/*.{js,jsx,ts,tsx}",
       ],
       env: {
         node: true,
@@ -93,6 +94,7 @@ module.exports = {
     },
   ],
   globals: {
-    shopify: "readonly"
+    shopify: "readonly",
+    process: "readonly",
   },
 };

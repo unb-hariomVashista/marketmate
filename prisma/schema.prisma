@@ -111,6 +111,7 @@ model SyncJob {
   completedAt   DateTime?
 
   @@index([shop, spreadsheetId])
+  @@index([shop, startedAt])
 }
 
 model StorePlan {

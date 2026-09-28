@@ -81,7 +81,7 @@ export async function getGoogleAccountByShop(shop) {
 export async function disconnectGoogleAccountFromShop(shop) {
   if (!shop) return null;
 
-  return prisma.storeGoogleConnection.delete({
+  return prisma.storeGoogleConnection.deleteMany({
     where: { shop },
   });
 }

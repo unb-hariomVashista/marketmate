@@ -152,10 +152,11 @@ export async function getTabsForShopAndSpreadsheet(shop, spreadsheetId) {
 }
 
 /**
- * Deletes a spreadsheet record.
+ * Deletes a spreadsheet record ensuring it belongs to the given Google account.
  */
-export async function deleteSpreadsheet(id) {
-  return prisma.appSpreadsheet.delete({
-    where: { id },
+export async function deleteSpreadsheet(id, googleAccountId) {
+  if (!id || !googleAccountId) return { count: 0 };
+  return prisma.appSpreadsheet.deleteMany({
+    where: { id, googleAccountId },
   });
 }

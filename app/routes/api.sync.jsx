@@ -58,10 +58,13 @@ export const action = async ({ request }) => {
       );
     }
 
-    // 2. Fetch Spreadsheet from DB
+    // 2. Fetch Spreadsheet from DB and verify ownership
     const spreadsheet = await getSpreadsheetById(spreadsheetId);
     if (!spreadsheet) {
       return Response.json({ error: "Spreadsheet not found." }, { status: 404 });
+    }
+    if (spreadsheet.googleAccountId !== googleAccount.id) {
+      return Response.json({ error: "Unauthorized access to requested spreadsheet." }, { status: 403 });
     }
 
     // 3. Fetch store markets and locations from Shopify

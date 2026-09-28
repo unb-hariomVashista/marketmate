@@ -64,7 +64,7 @@ export const loader = async ({ request }) => {
         }
 
         // Link Google Account to the Shopify Store
-        const googleAccount = await linkGoogleAccountToStore({
+        await linkGoogleAccountToStore({
             shop: targetShop,
             googleUser: {
                 googleUserId: userInfo.sub,
@@ -87,8 +87,6 @@ export const loader = async ({ request }) => {
     cleanHeaders.append("Content-Type", "text/html");
 
     const sanitizedShop = targetShop.replace(".myshopify.com", "");
-    const shop = targetShop;
-    console.log(shop)
     const appDashboardUrl = `https://admin.shopify.com/store/${sanitizedShop}/apps/${process.env.SHOPIFY_API_KEY}`;
 
     return redirect(appDashboardUrl, { headers: cleanHeaders });

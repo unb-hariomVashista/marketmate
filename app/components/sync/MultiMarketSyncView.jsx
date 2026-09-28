@@ -992,7 +992,7 @@ export function MultiMarketSyncView({
                           <div className="flex items-start gap-2 pt-1 text-[11px] text-indigo-900 bg-white/80 rounded-xl p-2.5 border border-indigo-100">
                             <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0 mt-0.5" />
                             <span>
-                              <strong>Cross-Store SKU Matching:</strong> Rows in each source tab are mapped to this store's products by matching their <strong>SKU</strong>, even across different Shopify store IDs.
+                              <strong>Cross-Store SKU Matching:</strong> Rows in each source tab are mapped to this store&apos;s products by matching their <strong>SKU</strong>, even across different Shopify store IDs.
                             </span>
                           </div>
                         </div>
@@ -1050,7 +1050,7 @@ export function MultiMarketSyncView({
                         {activeDirection === "SHOPIFY_TO_SHEET"
                           ? "export"
                           : "update"}
-                        . We'll add dedicated tabs for each{" "}
+                        . We&apos;ll add dedicated tabs for each{" "}
                         {itemSingularLabel.toLowerCase()} inside your connected
                         Google Sheet.
                       </p>

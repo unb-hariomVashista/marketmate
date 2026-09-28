@@ -29,6 +29,9 @@ export async function setStorePlan(shop, planKey, chargeId = null) {
   });
 }
 
+export const isBillingTestMode = () =>
+  process.env.SHOPIFY_BILLING_TEST === "true" || process.env.NODE_ENV !== "production";
+
 /**
  * Retrieves the store's current subscription plan.
  * Checks Shopify Billing API first, falling back to database records.
@@ -38,7 +41,7 @@ export async function getStorePlan(shop, billing = null) {
     try {
       const billingCheck = await billing.check({
         plans: [PLAN_STANDARD, PLAN_PRO],
-        isTest: true,
+        isTest: isBillingTestMode(),
       });
 
       if (billingCheck.hasActivePayment && billingCheck.appSubscriptions?.length > 0) {

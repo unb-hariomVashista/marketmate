@@ -26,7 +26,6 @@ export async function exportInventoryToSheet({
   googleAccount,
   spreadsheet,
   location,
-  market: _market = null,
   locations = [],
 }) {
   const targetLocation = location || locations[0];
@@ -130,7 +129,6 @@ export async function importInventoryFromSheet({
   googleAccount,
   spreadsheet,
   location,
-  market: _market = null,
   locations = [],
   sourceTabTitle = null,
 }) {
@@ -164,7 +162,6 @@ export async function importInventoryFromSheet({
 
     // Map column headers: support "SKU", "Available Quantity", "Quantity", or "[Location] (Qty)"
     const skuColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "SKU");
-    const _barcodeColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "BARCODE");
 
     let qtyColIndex = headers.findIndex(
       (h) =>
@@ -208,7 +205,6 @@ export async function importInventoryFromSheet({
     let matchedBySkuCount = 0;
     let matchedByGidCount = 0;
     let skippedCount = 0;
-    let invalidCount = 0;
 
     for (const row of rows) {
       const rawVariantId = row[0]?.trim();
@@ -420,7 +416,6 @@ export async function importPricingFromSheet({
     }
 
     const skuColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "SKU");
-    const _barcodeColIndex = headers.findIndex((h) => h.trim().toUpperCase() === "BARCODE");
     
     // Prioritize "Market Price" over "Base Price" when both exist
     let priceColIndex = headers.findIndex((h) =>
@@ -460,7 +455,6 @@ export async function importPricingFromSheet({
     let matchedBySkuCount = 0;
     let matchedByGidCount = 0;
     let skippedCount = 0;
-    let invalidCount = 0;
 
     for (const row of rows) {
       const rawVariantId = row[0]?.trim();

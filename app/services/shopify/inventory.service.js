@@ -3,7 +3,7 @@ import crypto from "crypto";
 /**
  * Fetches products, variants, and their inventory levels across specific locations.
  */
-export async function fetchProductsWithInventory(admin) {
+export async function fetchProductsWithInventory(admin, locationIds = []) {
   const query = `#graphql
     query GetVariantsWithInventory($cursor: String) {
       productVariants(first: 50, after: $cursor) {
@@ -46,6 +46,7 @@ export async function fetchProductsWithInventory(admin) {
   let hasNextPage = true;
   let cursor = null;
   const allVariants = [];
+  const targetLocSet = Array.isArray(locationIds) && locationIds.length > 0 ? new Set(locationIds) : null;
 
   while (hasNextPage) {
     const response = await admin.graphql(query, { variables: { cursor } });
@@ -62,6 +63,9 @@ export async function fetchProductsWithInventory(admin) {
       if (variant.inventoryItem?.inventoryLevels?.nodes) {
         for (const level of variant.inventoryItem.inventoryLevels.nodes) {
           const locId = level.location.id;
+          if (targetLocSet && !targetLocSet.has(locId)) {
+            continue;
+          }
           const availableQty =
             level.quantities.find((q) => q.name === "available")?.quantity ?? 0;
           inventoryByLocation[locId] = availableQty;

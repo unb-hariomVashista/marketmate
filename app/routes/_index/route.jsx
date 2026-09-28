@@ -18,9 +18,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>MarketMate — Multi-Market Pricing & Inventory</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Effortlessly synchronize Shopify Markets pricing and multi-location warehouse inventory with Google Sheets in real-time.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -36,16 +36,13 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Multi-Market Price Lists</strong>. Export and import fixed prices and localized currency adjustments per market using connected Google Sheets.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Multi-Location Inventory</strong>. Manage stock quantities across all your physical and fulfillment locations with automatic diff detection.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Two-Way Sheet Automation</strong>. Keep your store catalog updated effortlessly while protecting variant identifiers from accidental changes.
           </li>
         </ul>
       </div>

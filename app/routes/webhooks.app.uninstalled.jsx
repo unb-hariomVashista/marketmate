@@ -11,6 +11,9 @@ export const action = async ({ request }) => {
     await Promise.all([
       db.session.deleteMany({ where: { shop } }),
       db.storeGoogleConnection.deleteMany({ where: { shop } }),
+      db.storePlan.deleteMany({ where: { shop } }),
+      db.sheetTab.deleteMany({ where: { shop } }),
+      db.syncJob.deleteMany({ where: { shop } }),
     ]).catch((err) => {
       console.warn("Cleanup warning during app uninstall:", err.message);
     });

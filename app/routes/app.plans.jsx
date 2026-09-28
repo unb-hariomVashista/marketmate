@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useLoaderData, useRouteError, Form } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import {
   getStorePlan,
-  setStorePlan,
+  isBillingTestMode,
   PLAN_STANDARD,
   PLAN_PRO,
 } from "../services/plan.service";
@@ -15,14 +14,10 @@ import {
   Zap,
   Globe2,
   ShieldCheck,
-  Clock,
-  Sparkles,
-  HelpCircle,
   ChevronDown,
   ChevronUp,
   ArrowRight,
   ArrowLeft,
-  Boxes,
   AlertTriangle,
   Store,
   CheckCircle2,
@@ -78,7 +73,7 @@ export const action = async ({ request }) => {
     // navigate the merchant to Shopify's plan approval screen (admin.shopify.com/.../confirm_recurring_application_charge)
     return await billing.request({
       plan: selectedPlanName,
-      isTest: true,
+      isTest: isBillingTestMode(),
       returnUrl,
     });
   } catch (error) {
@@ -92,14 +87,11 @@ export const action = async ({ request }) => {
 
 export default function PlansPage() {
   const {
-    shop,
     currentPlan,
-    currentPlanDetails,
     locationsCount,
     marketsCount,
     returnTo,
   } = useLoaderData();
-  const shopify = useAppBridge();
 
   const [isAnnual, setIsAnnual] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
@@ -227,20 +219,21 @@ export default function PlansPage() {
           MarketMate Subscription Plans
         </h1>
         <p className="text-sm text-gray-600 leading-relaxed">
-          Simple, transparent pricing tailored to your store's warehouse
+          Simple, transparent pricing tailored to your store&apos;s warehouse
           locations and commercial markets. There is no free plan.
         </p>
 
         {/* Monthly / Annual Toggle */}
         <div className="pt-2 flex items-center justify-center gap-3">
-          <span
-            className={`text-xs font-semibold cursor-pointer ${
+          <button
+            type="button"
+            className={`text-xs font-semibold cursor-pointer border-0 bg-transparent ${
               !isAnnual ? "text-gray-900 font-bold" : "text-gray-500"
             }`}
             onClick={() => setIsAnnual(false)}
           >
             Monthly billing
-          </span>
+          </button>
 
           <button
             type="button"
@@ -248,6 +241,7 @@ export default function PlansPage() {
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
               isAnnual ? "bg-emerald-700" : "bg-gray-300"
             }`}
+            aria-label="Toggle annual billing"
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
@@ -256,8 +250,9 @@ export default function PlansPage() {
             />
           </button>
 
-          <span
-            className={`text-xs font-semibold cursor-pointer flex items-center gap-1.5 ${
+          <button
+            type="button"
+            className={`text-xs font-semibold cursor-pointer border-0 bg-transparent flex items-center gap-1.5 ${
               isAnnual ? "text-gray-900 font-bold" : "text-gray-500"
             }`}
             onClick={() => setIsAnnual(true)}
@@ -266,7 +261,7 @@ export default function PlansPage() {
             <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
               Save ~18%
             </span>
-          </span>
+          </button>
         </div>
       </div>
 
@@ -393,7 +388,7 @@ export default function PlansPage() {
                 {/* Feature Bullet List */}
                 <div className="py-5 space-y-3">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block">
-                    What's included:
+                    What&apos;s included:
                   </span>
                   <ul className="space-y-2.5">
                     {plan.features.map((feature, idx) => (
@@ -470,7 +465,7 @@ export default function PlansPage() {
             </h3>
             <p className="text-xs text-gray-500 leading-relaxed">
               Column A is permanently protected in Google Sheets. Accidental
-              cell deletions or edits won't break your product links.
+              cell deletions or edits won&apos;t break your product links.
             </p>
           </div>
 
