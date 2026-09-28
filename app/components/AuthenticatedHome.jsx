@@ -140,26 +140,27 @@ export const AuthenticatedHome = ({
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#ecfdf5] text-[#059669] border border-[#a7f3d0]">
                 <Check className="w-3 h-3 stroke-[3]" /> Connected
               </span>
-              {storePlan?.plan === "PRO" ? (
+              {storePlan?.plan?.toLowerCase() === "pro" ? (
                 <a
-                  href="/app/plans?returnTo=/app"
+                  href="/app/plans?view=true&returnTo=/app"
                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 transition-colors shadow-2xs"
                 >
                   <Sparkles className="w-3 h-3 text-emerald-700" /> Pro Plan ($22/mo)
                 </a>
-              ) : storePlan?.plan === "STANDARD" ? (
+              ) : storePlan?.plan?.toLowerCase() === "standard" ? (
                 <a
-                  href="/app/plans?returnTo=/app"
+                  href="/app/plans?plan=pro&returnTo=/app"
                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-colors shadow-2xs"
+                  title="Click to upgrade to Pro ($22/mo)"
                 >
-                  Standard Plan ($11/mo)
+                  Standard Plan ($11/mo) • Upgrade
                 </a>
               ) : (
                 <a
                   href="/app/plans?returnTo=/app"
                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors shadow-2xs"
                 >
-                  <AlertTriangle className="w-3 h-3 text-amber-700" /> Select Plan ($11 or $22)
+                  <AlertTriangle className="w-3 h-3 text-amber-700" /> Activate Subscription
                 </a>
               )}
             </div>
@@ -169,7 +170,7 @@ export const AuthenticatedHome = ({
 
         <div className="flex items-center gap-2">
           <a
-            href="/app/plans?returnTo=/app"
+            href={storePlan?.hasActivePayment ? "/app/plans?view=true&returnTo=/app" : "/app/plans?returnTo=/app"}
             className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs"
           >
             <span>Subscription</span>

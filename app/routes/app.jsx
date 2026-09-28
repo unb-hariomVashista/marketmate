@@ -23,7 +23,7 @@ export default function App() {
         <a href="/app/inventory">Locations</a>
         <a href="/app/pricing">Markets</a>
         <a href="/app/logs">Logs</a>
-        <a href="/app/plans">Plans</a>
+        <a href="/app/plans?view=true">Plans</a>
       </NavMenu>
       <Outlet />
     </AppProvider>

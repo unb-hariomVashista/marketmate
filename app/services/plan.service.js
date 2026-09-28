@@ -4,6 +4,19 @@ import { PLAN_STANDARD, PLAN_PRO } from "../shopify.server";
 export { PLAN_STANDARD, PLAN_PRO };
 
 export const PLAN_LIMITS = {
+  standard: {
+    name: PLAN_STANDARD,
+    price: 11,
+    maxLocations: 3,
+    maxMarkets: 3,
+  },
+  pro: {
+    name: PLAN_PRO,
+    price: 22,
+    maxLocations: Infinity,
+    maxMarkets: Infinity,
+  },
+  // Backward compatibility aliases
   STANDARD: {
     name: PLAN_STANDARD,
     price: 11,
@@ -22,10 +35,11 @@ export const PLAN_LIMITS = {
  * Updates or sets the store's current plan in DB.
  */
 export async function setStorePlan(shop, planKey, chargeId = null) {
+  const normalizedKey = planKey?.toLowerCase() === "pro" ? "pro" : "standard";
   return prisma.storePlan.upsert({
     where: { shop },
-    update: { plan: planKey, status: "ACTIVE", chargeId },
-    create: { shop, plan: planKey, status: "ACTIVE", chargeId },
+    update: { plan: normalizedKey, status: "ACTIVE", chargeId },
+    create: { shop, plan: normalizedKey, status: "ACTIVE", chargeId },
   });
 }
 
@@ -47,7 +61,7 @@ export async function getStorePlan(shop, billing = null) {
       if (billingCheck.hasActivePayment && billingCheck.appSubscriptions?.length > 0) {
         const activeSub = billingCheck.appSubscriptions[0];
         const isPro = activeSub.name?.toLowerCase().includes("pro");
-        const planKey = isPro ? "PRO" : "STANDARD";
+        const planKey = isPro ? "pro" : "standard";
 
         await setStorePlan(shop, planKey, activeSub.id);
 
@@ -68,11 +82,14 @@ export async function getStorePlan(shop, billing = null) {
     where: { shop },
   });
 
-  if (record && record.status === "ACTIVE" && (record.plan === "PRO" || record.plan === "STANDARD")) {
+  const normalizedDbPlan = record?.plan?.toLowerCase();
+
+  if (record && record.status === "ACTIVE" && (normalizedDbPlan === "pro" || normalizedDbPlan === "standard")) {
+    const isPro = normalizedDbPlan === "pro";
     return {
-      plan: record.plan,
-      name: record.plan === "PRO" ? PLAN_PRO : PLAN_STANDARD,
-      amount: record.plan === "PRO" ? 22 : 11,
+      plan: normalizedDbPlan,
+      name: isPro ? PLAN_PRO : PLAN_STANDARD,
+      amount: isPro ? 22 : 11,
       hasActivePayment: true,
     };
   }
@@ -92,30 +109,31 @@ export async function getStorePlan(shop, billing = null) {
 export function checkFeatureAccess({ plan, type, locationsCount = 0, marketsCount = 0 }) {
   const isInventory = type === "INVENTORY";
   const isPricing = type === "PRICING";
+  const normalizedPlan = plan?.toLowerCase();
 
   // No active plan: there is no free tier
-  if (!plan) {
+  if (!normalizedPlan) {
     const requiredPlan =
       (isInventory && locationsCount > 3) || (isPricing && marketsCount > 3)
-        ? "PRO"
-        : "STANDARD";
+        ? "pro"
+        : "standard";
 
     return {
       allowed: false,
       reason: "NO_PLAN",
       requiredPlan,
-      requiredPrice: requiredPlan === "PRO" ? 22 : 11,
+      requiredPrice: requiredPlan === "pro" ? 22 : 11,
       message:
         "Active subscription required. MarketMate does not offer a free tier. Please choose the $11 Standard Plan or $22 Pro Plan.",
     };
   }
 
   // If on Pro plan ($22/mo), everything is unlocked
-  if (plan === "PRO") {
+  if (normalizedPlan === "pro") {
     return {
       allowed: true,
       reason: "PRO_UNLIMITED",
-      requiredPlan: "PRO",
+      requiredPlan: "pro",
       requiredPrice: 22,
       message: "Pro Plan active (Unlimited locations & markets).",
     };
@@ -130,7 +148,7 @@ export function checkFeatureAccess({ plan, type, locationsCount = 0, marketsCoun
       return {
         allowed: false,
         reason: "LOCATION_LIMIT_EXCEEDED",
-        requiredPlan: "PRO",
+        requiredPlan: "pro",
         requiredPrice: 22,
         message: `Your store has ${locationsCount} locations. Inventory sync for stores with more than 3 locations requires the Pro Plan ($22/mo).`,
       };
@@ -139,7 +157,7 @@ export function checkFeatureAccess({ plan, type, locationsCount = 0, marketsCoun
     return {
       allowed: true,
       reason: "WITHIN_LIMITS",
-      requiredPlan: "STANDARD",
+      requiredPlan: "standard",
       requiredPrice: 11,
       message: `Standard Plan active (${locationsCount}/3 locations used).`,
     };
@@ -150,7 +168,7 @@ export function checkFeatureAccess({ plan, type, locationsCount = 0, marketsCoun
       return {
         allowed: false,
         reason: "MARKET_LIMIT_EXCEEDED",
-        requiredPlan: "PRO",
+        requiredPlan: "pro",
         requiredPrice: 22,
         message: `Your store has ${marketsCount} markets. Pricing sync for stores with more than 3 markets requires the Pro Plan ($22/mo).`,
       };
@@ -159,7 +177,7 @@ export function checkFeatureAccess({ plan, type, locationsCount = 0, marketsCoun
     return {
       allowed: true,
       reason: "WITHIN_LIMITS",
-      requiredPlan: "STANDARD",
+      requiredPlan: "standard",
       requiredPrice: 11,
       message: `Standard Plan active (${marketsCount}/3 markets used).`,
     };

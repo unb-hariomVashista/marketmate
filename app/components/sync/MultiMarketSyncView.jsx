@@ -296,20 +296,20 @@ export function MultiMarketSyncView({
             <h1 className="text-3xl font-extrabold tracking-tight text-gray-950">
               Multi-market sync
             </h1>
-            {storePlan?.plan === "PRO" ? (
+            {storePlan?.plan?.toLowerCase() === "pro" ? (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600" /> Pro Plan ($22/mo) • Unlimited
               </span>
-            ) : storePlan?.plan === "STANDARD" ? (
+            ) : storePlan?.plan?.toLowerCase() === "standard" ? (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200">
                 Standard Plan ($11/mo) • {isInventory ? `${locations.length}/3 Locations` : `${markets.length}/3 Markets`}
               </span>
             ) : (
               <a
-                href={`/app/plans?returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
+                href={`/app/plans?plan=${planAccess?.requiredPlan?.toLowerCase() === "pro" ? "pro" : "standard"}&returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors"
               >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> No Active Plan (Select $11 or $22)
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> Activate Subscription
               </a>
             )}
           </div>
@@ -528,10 +528,10 @@ export function MultiMarketSyncView({
           </div>
 
           <a
-            href={`/app/plans?returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
+            href={`/app/plans?plan=${planAccess.requiredPlan?.toLowerCase() === "pro" ? "pro" : "standard"}&returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold shrink-0 shadow-xs transition-colors"
           >
-            <span>{planAccess.requiredPlan === "PRO" ? "Upgrade to Pro ($22/mo)" : "Choose Plan ($11 or $22)"}</span>
+            <span>{planAccess.requiredPlan?.toLowerCase() === "pro" ? "Upgrade to Pro ($22/mo)" : "Activate Plan ($11/mo)"}</span>
             <ArrowRight className="w-4 h-4" />
           </a>
         </div>

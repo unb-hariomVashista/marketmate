@@ -24,12 +24,24 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+export function getBillingReturnUrl(shop, returnTo = "/app") {
+  const shopHandle = shop.replace(".myshopify.com", "");
+  const appHandle = process.env.SHOPIFY_APP_HANDLE || "marketmate-pricing-inventory";
+  const cleanPath = returnTo.startsWith("/app")
+    ? returnTo
+    : `/app${returnTo.startsWith("/") ? returnTo : `/${returnTo}`}`;
+
+  return `https://admin.shopify.com/store/${shopHandle}/apps/${appHandle}${cleanPath}`;
+}
+
 export const loader = async ({ request }) => {
   const { session, billing, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") || "/app";
+  const targetPlan = url.searchParams.get("plan")?.toLowerCase();
+  const viewOnly = url.searchParams.get("view") === "true";
 
   const [storePlan, storeData] = await Promise.all([
     getStorePlan(shop, billing),
@@ -41,10 +53,47 @@ export const loader = async ({ request }) => {
 
   const locationsCount = storeData.locations?.length || 0;
   const marketsCount = storeData.markets?.length || 0;
+  const exceedsLocations = locationsCount > 3;
+  const exceedsMarkets = marketsCount > 3;
+  const requiresPro = exceedsLocations || exceedsMarkets;
+
+  // Auto-redirect to Shopify billing approval page unless explicitly in view-only mode
+  // (e.g. browsing plan details from nav). If a specific plan is passed (?plan=pro or ?plan=standard),
+  // or if the store has no active subscription, immediately request billing.
+  const hasActivePayment = storePlan?.hasActivePayment;
+  const shouldAutoRedirect = Boolean(targetPlan) || (!hasActivePayment && !viewOnly);
+
+  if (shouldAutoRedirect) {
+    let planToRequest = PLAN_STANDARD;
+
+    if (targetPlan === "pro" || (requiresPro && targetPlan !== "standard")) {
+      planToRequest = PLAN_PRO;
+    } else if (targetPlan === "standard") {
+      planToRequest = PLAN_STANDARD;
+    } else {
+      planToRequest = requiresPro ? PLAN_PRO : PLAN_STANDARD;
+    }
+
+    const returnUrl = getBillingReturnUrl(shop, returnTo);
+
+    try {
+      return await billing.request({
+        plan: planToRequest,
+        isTest: isBillingTestMode(),
+        returnUrl,
+      });
+    } catch (error) {
+      if (error instanceof Response || (error && error.status && error.headers)) {
+        throw error;
+      }
+      console.error("Shopify billing request error in loader:", error);
+      throw error;
+    }
+  }
 
   return Response.json({
     shop,
-    currentPlan: storePlan.plan, // "STANDARD", "PRO", or null
+    currentPlan: storePlan.plan,
     currentPlanDetails: storePlan,
     locationsCount,
     marketsCount,
@@ -57,28 +106,26 @@ export const action = async ({ request }) => {
   const shop = session.shop;
 
   const formData = await request.formData();
-  const planKey = formData.get("planKey"); // "STANDARD" or "PRO"
+  const rawKey = formData.get("planKey");
+  const returnTo = formData.get("returnTo") || "/app";
+  const planKey = rawKey?.toLowerCase(); // "standard" or "pro"
 
-  if (planKey !== "STANDARD" && planKey !== "PRO") {
+  if (planKey !== "standard" && planKey !== "pro") {
     return Response.json({ error: "Invalid plan selected" }, { status: 400 });
   }
 
-  const selectedPlanName = planKey === "PRO" ? PLAN_PRO : PLAN_STANDARD;
-  const apiKey = process.env.SHOPIFY_API_KEY;
-  const returnUrl = `https://${shop}/admin/apps/${apiKey}/app`;
+  const selectedPlanName = planKey === "pro" ? PLAN_PRO : PLAN_STANDARD;
+  const returnUrl = getBillingReturnUrl(shop, returnTo);
 
   try {
-    // Request Shopify Billing subscription.
-    // In Shopify apps, billing.request throws a redirect response that App Bridge uses to
-    // navigate the merchant to Shopify's plan approval screen (admin.shopify.com/.../confirm_recurring_application_charge)
     return await billing.request({
       plan: selectedPlanName,
       isTest: isBillingTestMode(),
       returnUrl,
     });
   } catch (error) {
-    if (error instanceof Response) {
-      throw error; // Propagate redirect response so App Bridge navigates to Shopify approval page
+    if (error instanceof Response || (error && error.status && error.headers)) {
+      throw error;
     }
     console.error("Shopify billing request error:", error);
     throw error;
@@ -104,9 +151,11 @@ export default function PlansPage() {
   const exceedsMarkets = marketsCount > 3;
   const requiresPro = exceedsLocations || exceedsMarkets;
 
+  const currentPlanNormalized = currentPlan?.toLowerCase();
+
   const plans = [
     {
-      key: "STANDARD",
+      key: "standard",
       name: "Standard Plan",
       description:
         "Ideal for stores with up to 3 locations and up to 3 markets.",
@@ -123,7 +172,7 @@ export default function PlansPage() {
         "Multi-Store Hub (Link shared Google Account)",
         "Standard Email Support",
       ],
-      isCurrent: currentPlan === "STANDARD",
+      isCurrent: currentPlanNormalized === "standard",
       isRestricted: requiresPro,
       restrictionText: `Your store has ${
         exceedsLocations && exceedsMarkets
@@ -133,13 +182,13 @@ export default function PlansPage() {
             : `${marketsCount} markets (>3 limit)`
       }. Upgrading to Pro ($22) is required.`,
       ctaText:
-        currentPlan === "STANDARD"
+        currentPlanNormalized === "standard"
           ? "Current Plan"
           : "Choose Standard ($11/mo)",
-      disabled: currentPlan === "STANDARD",
+      disabled: currentPlanNormalized === "standard",
     },
     {
-      key: "PRO",
+      key: "pro",
       name: "Pro Plan",
       description:
         "Required if store has more than 3 locations or more than 3 markets.",
@@ -156,11 +205,11 @@ export default function PlansPage() {
         "Real-Time Smart Diffing & Audit Logs",
         "Priority Support (4-hour SLA)",
       ],
-      isCurrent: currentPlan === "PRO",
+      isCurrent: currentPlanNormalized === "pro",
       isRestricted: false,
       ctaText:
-        currentPlan === "PRO" ? "Current Plan" : "Upgrade to Pro ($22/mo)",
-      disabled: currentPlan === "PRO",
+        currentPlanNormalized === "pro" ? "Current Plan" : "Upgrade to Pro ($22/mo)",
+      disabled: currentPlanNormalized === "pro",
     },
   ];
 
@@ -408,6 +457,7 @@ export default function PlansPage() {
               <div className="pt-4 border-t border-gray-100">
                 <Form method="post">
                   <input type="hidden" name="planKey" value={plan.key} />
+                  <input type="hidden" name="returnTo" value={returnTo} />
                   <button
                     type="submit"
                     disabled={plan.disabled}
