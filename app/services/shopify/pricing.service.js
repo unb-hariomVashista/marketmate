@@ -130,6 +130,7 @@ export async function ensureMarketPriceList(admin, market) {
             id
             title
             status
+            __typename
             priceList {
               id
               name
@@ -145,16 +146,24 @@ export async function ensureMarketPriceList(admin, market) {
     const data = await executeGraphQLWithRetry(admin, marketQuery, { variables: { id: market.id } });
     const catalogNodes = data.data?.market?.catalogs?.nodes || [];
 
-    // 1. Look for any catalog that already has an active priceList
-    const catWithPriceList = catalogNodes.find((c) => c.priceList?.id);
+    // Case 1: Multiple catalogs exist.
+    // Prioritize retail MarketCatalog over B2B CompanyLocationCatalog, and look for existing priceList
+    const catWithPriceList =
+      catalogNodes.find((c) => c.__typename === "MarketCatalog" && c.priceList?.id) ||
+      catalogNodes.find((c) => c.priceList?.id);
+
     if (catWithPriceList?.priceList?.id) {
       market.priceListId = catWithPriceList.priceList.id;
       market.catalogId = catWithPriceList.id;
       return catWithPriceList.priceList.id;
     }
 
-    // 2. If no priceList yet, select the first active/available catalog for this market
-    const targetCatalog = catalogNodes.find((c) => c.status === "ACTIVE") || catalogNodes[0];
+    // If no priceList yet, pick the active MarketCatalog
+    const targetCatalog =
+      catalogNodes.find((c) => c.__typename === "MarketCatalog" && c.status === "ACTIVE") ||
+      catalogNodes.find((c) => c.status === "ACTIVE") ||
+      catalogNodes[0];
+
     if (targetCatalog?.id) {
       catalogId = targetCatalog.id;
       market.catalogId = targetCatalog.id;
@@ -163,8 +172,53 @@ export async function ensureMarketPriceList(admin, market) {
     console.warn("Could not query market catalogs:", e.message);
   }
 
+  // Case 2: Zero catalogs attached to this market.
+  // Automatically create a new Catalog linked to this market context via catalogCreate
   if (!catalogId) {
-    console.error(`No catalog found for market ${market.name} (${market.id})`);
+    console.info(`No catalog attached to market ${market.name}. Creating one automatically...`);
+    const catalogCreateMutation = `#graphql
+      mutation CreateCatalogForMarket($input: CatalogCreateInput!) {
+        catalogCreate(input: $input) {
+          catalog {
+            id
+            title
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    try {
+      const catRes = await executeGraphQLWithRetry(admin, catalogCreateMutation, {
+        variables: {
+          input: {
+            title: `${market.name} Catalog`,
+            status: "ACTIVE",
+            context: {
+              marketIds: [market.id],
+            },
+          },
+        },
+      });
+
+      const newCatId = catRes.data?.catalogCreate?.catalog?.id;
+      if (newCatId) {
+        catalogId = newCatId;
+        market.catalogId = newCatId;
+      } else {
+        const uErr = catRes.data?.catalogCreate?.userErrors?.map((e) => e.message).join(", ");
+        console.error("catalogCreate error:", uErr);
+      }
+    } catch (createCatErr) {
+      console.error("Failed to automatically create catalog for market:", createCatErr.message);
+    }
+  }
+
+  if (!catalogId) {
+    console.error(`Unable to resolve or create catalog for market ${market.name} (${market.id})`);
     return null;
   }
 
