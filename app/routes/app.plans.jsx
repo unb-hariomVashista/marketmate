@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useLoaderData, useRouteError, Form } from "react-router";
+import { useLoaderData, useRouteError } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import {
@@ -40,8 +41,6 @@ export const loader = async ({ request }) => {
 
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") || "/app";
-  const targetPlan = url.searchParams.get("plan")?.toLowerCase();
-  const viewOnly = url.searchParams.get("view") === "true";
 
   const [storePlan, storeData] = await Promise.all([
     getStorePlan(shop, billing),
@@ -53,52 +52,15 @@ export const loader = async ({ request }) => {
 
   const locationsCount = storeData.locations?.length || 0;
   const marketsCount = storeData.markets?.length || 0;
-  const exceedsLocations = locationsCount > 3;
-  const exceedsMarkets = marketsCount > 3;
-  const requiresPro = exceedsLocations || exceedsMarkets;
 
-  // Auto-redirect to Shopify billing approval page unless explicitly in view-only mode
-  // (e.g. browsing plan details from nav). If a specific plan is passed (?plan=pro or ?plan=standard),
-  // or if the store has no active subscription, immediately request billing.
-  const hasActivePayment = storePlan?.hasActivePayment;
-  const shouldAutoRedirect = Boolean(targetPlan) || (!hasActivePayment && !viewOnly);
-
-  if (shouldAutoRedirect) {
-    let planToRequest = PLAN_STANDARD;
-
-    if (targetPlan === "pro" || (requiresPro && targetPlan !== "standard")) {
-      planToRequest = PLAN_PRO;
-    } else if (targetPlan === "standard") {
-      planToRequest = PLAN_STANDARD;
-    } else {
-      planToRequest = requiresPro ? PLAN_PRO : PLAN_STANDARD;
-    }
-
-    const returnUrl = getBillingReturnUrl(shop, returnTo);
-
-    try {
-      return await billing.request({
-        plan: planToRequest,
-        isTest: isBillingTestMode(),
-        returnUrl,
-      });
-    } catch (error) {
-      if (error instanceof Response || (error && error.status && error.headers)) {
-        throw error;
-      }
-      console.error("Shopify billing request error in loader:", error);
-      throw error;
-    }
-  }
-
-  return Response.json({
+  return {
     shop,
     currentPlan: storePlan.plan,
     currentPlanDetails: storePlan,
     locationsCount,
     marketsCount,
     returnTo,
-  });
+  };
 };
 
 export const action = async ({ request }) => {
@@ -133,6 +95,7 @@ export const action = async ({ request }) => {
 };
 
 export default function PlansPage() {
+  const shopify = useAppBridge();
   const {
     currentPlan,
     locationsCount,
@@ -140,7 +103,7 @@ export default function PlansPage() {
     returnTo,
   } = useLoaderData();
 
-  const [isAnnual, setIsAnnual] = useState(false);
+  const [subscribingKey, setSubscribingKey] = useState(null);
   const [openFaqIndex, setOpenFaqIndex] = useState(null);
 
   const toggleFaq = (index) => {
@@ -153,6 +116,30 @@ export default function PlansPage() {
 
   const currentPlanNormalized = currentPlan?.toLowerCase();
 
+  const handleSubscribe = async (planKey) => {
+    setSubscribingKey(planKey);
+    try {
+      const res = await fetch(
+        `/api/billing/subscribe?plan=${planKey}&returnTo=${encodeURIComponent(returnTo || "/app")}`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (data.confirmationUrl) {
+        open(data.confirmationUrl, "_top");
+      } else {
+        shopify.toast.show(data.error || "Failed to initiate subscription", {
+          isError: true,
+        });
+        setSubscribingKey(null);
+      }
+    } catch (err) {
+      shopify.toast.show("Network error initiating subscription", {
+        isError: true,
+      });
+      setSubscribingKey(null);
+    }
+  };
+
   const plans = [
     {
       key: "standard",
@@ -160,7 +147,6 @@ export default function PlansPage() {
       description:
         "Ideal for stores with up to 3 locations and up to 3 markets.",
       monthlyPrice: 11,
-      annualPrice: 9,
       popular: !requiresPro,
       badge: !requiresPro ? "RECOMMENDED FOR YOUR STORE" : null,
       features: [
@@ -193,7 +179,6 @@ export default function PlansPage() {
       description:
         "Required if store has more than 3 locations or more than 3 markets.",
       monthlyPrice: 22,
-      annualPrice: 18,
       popular: requiresPro,
       badge: requiresPro ? "REQUIRED FOR YOUR STORE" : "UNLIMITED SCALE",
       features: [
@@ -268,50 +253,9 @@ export default function PlansPage() {
           MarketMate Subscription Plans
         </h1>
         <p className="text-sm text-gray-600 leading-relaxed">
-          Simple, transparent pricing tailored to your store&apos;s warehouse
+          Simple, transparent monthly pricing tailored to your store&apos;s warehouse
           locations and commercial markets. There is no free plan.
         </p>
-
-        {/* Monthly / Annual Toggle */}
-        <div className="pt-2 flex items-center justify-center gap-3">
-          <button
-            type="button"
-            className={`text-xs font-semibold cursor-pointer border-0 bg-transparent ${
-              !isAnnual ? "text-gray-900 font-bold" : "text-gray-500"
-            }`}
-            onClick={() => setIsAnnual(false)}
-          >
-            Monthly billing
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsAnnual(!isAnnual)}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-              isAnnual ? "bg-emerald-700" : "bg-gray-300"
-            }`}
-            aria-label="Toggle annual billing"
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                isAnnual ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
-
-          <button
-            type="button"
-            className={`text-xs font-semibold cursor-pointer border-0 bg-transparent flex items-center gap-1.5 ${
-              isAnnual ? "text-gray-900 font-bold" : "text-gray-500"
-            }`}
-            onClick={() => setIsAnnual(true)}
-          >
-            <span>Annual billing</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
-              Save ~18%
-            </span>
-          </button>
-        </div>
       </div>
 
       {/* Store Status & Guidance Callout Banner */}
@@ -359,7 +303,7 @@ export default function PlansPage() {
             <span className="text-xs text-gray-500">Active Plan:</span>
             {currentPlan ? (
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                {currentPlan === "PRO"
+                {currentPlan === "pro" || currentPlan === "PRO"
                   ? "Pro Plan ($22/mo)"
                   : "Standard Plan ($11/mo)"}
               </span>
@@ -375,8 +319,6 @@ export default function PlansPage() {
       {/* Pricing Cards Grid (2 Columns) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch max-w-4xl mx-auto">
         {plans.map((plan) => {
-          const price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
-
           return (
             <div
               key={plan.key}
@@ -389,7 +331,7 @@ export default function PlansPage() {
               {plan.badge && (
                 <div
                   className={`absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full text-[11px] font-extrabold tracking-wider uppercase shadow-sm ${
-                    plan.key === "PRO" && requiresPro
+                    plan.key === "pro" && requiresPro
                       ? "bg-emerald-700 text-white ring-2 ring-emerald-300"
                       : "bg-emerald-600 text-white"
                   }`}
@@ -419,10 +361,10 @@ export default function PlansPage() {
                 {/* Price Display */}
                 <div className="py-4 border-y border-gray-100 flex items-baseline gap-1">
                   <span className="text-4xl font-extrabold tracking-tight text-gray-950">
-                    ${price}
+                    ${plan.monthlyPrice}
                   </span>
                   <span className="text-xs font-medium text-gray-500">
-                    / month {isAnnual && "(billed annually)"}
+                    / month
                   </span>
                 </div>
 
@@ -455,24 +397,27 @@ export default function PlansPage() {
 
               {/* Action Button */}
               <div className="pt-4 border-t border-gray-100">
-                <Form method="post">
-                  <input type="hidden" name="planKey" value={plan.key} />
-                  <input type="hidden" name="returnTo" value={returnTo} />
-                  <button
-                    type="submit"
-                    disabled={plan.disabled}
-                    className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
-                      plan.popular
-                        ? "bg-emerald-800 hover:bg-emerald-900 text-white shadow-sm"
-                        : plan.disabled
-                          ? "bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200"
-                          : "bg-gray-900 hover:bg-gray-800 text-white"
-                    }`}
-                  >
-                    <span>{plan.ctaText}</span>
-                    {!plan.disabled && <ArrowRight className="w-3.5 h-3.5" />}
-                  </button>
-                </Form>
+                <button
+                  type="button"
+                  disabled={plan.disabled || subscribingKey !== null}
+                  onClick={() => handleSubscribe(plan.key)}
+                  className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                    plan.popular
+                      ? "bg-emerald-800 hover:bg-emerald-900 text-white shadow-sm"
+                      : plan.disabled
+                        ? "bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200"
+                        : "bg-gray-900 hover:bg-gray-800 text-white"
+                  }`}
+                >
+                  <span>
+                    {subscribingKey === plan.key
+                      ? "Redirecting to Shopify Billing..."
+                      : plan.ctaText}
+                  </span>
+                  {!plan.disabled && subscribingKey !== plan.key && (
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  )}
+                </button>
               </div>
             </div>
           );

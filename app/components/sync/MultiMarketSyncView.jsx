@@ -84,6 +84,33 @@ export function MultiMarketSyncView({
   const [previewSummary, setPreviewSummary] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+
+  const handleSubscribe = async (planKey = "standard") => {
+    setIsSubscribing(true);
+    try {
+      const returnTo = isInventory ? "/app/inventory" : "/app/pricing";
+      const normalizedKey = planKey?.toLowerCase() === "pro" ? "pro" : "standard";
+      const res = await fetch(
+        `/api/billing/subscribe?plan=${normalizedKey}&returnTo=${encodeURIComponent(returnTo)}`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (data.confirmationUrl) {
+        open(data.confirmationUrl, "_top");
+      } else {
+        shopify.toast.show(data.error || "Failed to initiate subscription", {
+          isError: true,
+        });
+        setIsSubscribing(false);
+      }
+    } catch (err) {
+      shopify.toast.show("Network error initiating subscription", {
+        isError: true,
+      });
+      setIsSubscribing(false);
+    }
+  };
 
   const activeSheet =
     spreadsheets.find((s) => s.id === selectedSheetId) ||
@@ -305,12 +332,15 @@ export function MultiMarketSyncView({
                 Standard Plan ($11/mo) • {isInventory ? `${locations.length}/3 Locations` : `${markets.length}/3 Markets`}
               </span>
             ) : (
-              <a
-                href={`/app/plans?plan=${planAccess?.requiredPlan?.toLowerCase() === "pro" ? "pro" : "standard"}&returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors"
+              <button
+                type="button"
+                onClick={() => handleSubscribe(planAccess?.requiredPlan || "standard")}
+                disabled={isSubscribing}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer"
               >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" /> Activate Subscription
-              </a>
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <span>{isSubscribing ? "Redirecting..." : "Activate Subscription"}</span>
+              </button>
             )}
           </div>
           <p className="text-sm font-semibold text-gray-700">
@@ -527,13 +557,21 @@ export function MultiMarketSyncView({
             </div>
           </div>
 
-          <a
-            href={`/app/plans?plan=${planAccess.requiredPlan?.toLowerCase() === "pro" ? "pro" : "standard"}&returnTo=${encodeURIComponent(isInventory ? "/app/inventory" : "/app/pricing")}`}
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold shrink-0 shadow-xs transition-colors"
+          <button
+            type="button"
+            onClick={() => handleSubscribe(planAccess.requiredPlan || "standard")}
+            disabled={isSubscribing}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold shrink-0 shadow-xs transition-colors cursor-pointer"
           >
-            <span>{planAccess.requiredPlan?.toLowerCase() === "pro" ? "Upgrade to Pro ($22/mo)" : "Activate Plan ($11/mo)"}</span>
+            <span>
+              {isSubscribing
+                ? "Redirecting to Shopify Billing..."
+                : planAccess.requiredPlan?.toLowerCase() === "pro"
+                  ? "Upgrade to Pro ($22/mo)"
+                  : "Activate Plan ($11/mo)"}
+            </span>
             <ArrowRight className="w-4 h-4" />
-          </a>
+          </button>
         </div>
       )}
 

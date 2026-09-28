@@ -38,6 +38,31 @@ export const AuthenticatedHome = ({
   const shopName = currentShop?.replace(".myshopify.com", "") || "Store";
   const [newSheetTitle, setNewSheetTitle] = useState(`${shopName} - Inventory`);
   const [isSubmittingSheet, setIsSubmittingSheet] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+
+  const handleSubscribe = async (planKey = null) => {
+    setIsSubscribing(true);
+    try {
+      const url = planKey
+        ? `/api/billing/subscribe?plan=${planKey}&returnTo=/app`
+        : `/api/billing/subscribe?returnTo=/app`;
+      const res = await fetch(url, { method: "POST" });
+      const data = await res.json();
+      if (data.confirmationUrl) {
+        open(data.confirmationUrl, "_top");
+      } else {
+        shopify.toast.show(data.error || "Failed to initiate subscription", {
+          isError: true,
+        });
+        setIsSubscribing(false);
+      }
+    } catch (err) {
+      shopify.toast.show("Network error initiating subscription", {
+        isError: true,
+      });
+      setIsSubscribing(false);
+    }
+  };
 
   const handleCreateSheet = async (e) => {
     e.preventDefault();
@@ -142,26 +167,31 @@ export const AuthenticatedHome = ({
               </span>
               {storePlan?.plan?.toLowerCase() === "pro" ? (
                 <a
-                  href="/app/plans?view=true&returnTo=/app"
+                  href="/app/plans"
                   className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200 transition-colors shadow-2xs"
                 >
                   <Sparkles className="w-3 h-3 text-emerald-700" /> Pro Plan ($22/mo)
                 </a>
               ) : storePlan?.plan?.toLowerCase() === "standard" ? (
-                <a
-                  href="/app/plans?plan=pro&returnTo=/app"
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-colors shadow-2xs"
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe("pro")}
+                  disabled={isSubscribing}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 transition-colors shadow-2xs cursor-pointer"
                   title="Click to upgrade to Pro ($22/mo)"
                 >
-                  Standard Plan ($11/mo) • Upgrade
-                </a>
+                  Standard Plan ($11/mo) • {isSubscribing ? "Redirecting..." : "Upgrade"}
+                </button>
               ) : (
-                <a
-                  href="/app/plans?returnTo=/app"
-                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors shadow-2xs"
+                <button
+                  type="button"
+                  onClick={() => handleSubscribe()}
+                  disabled={isSubscribing}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors shadow-2xs cursor-pointer"
                 >
-                  <AlertTriangle className="w-3 h-3 text-amber-700" /> Activate Subscription
-                </a>
+                  <AlertTriangle className="w-3 h-3 text-amber-700" />
+                  <span>{isSubscribing ? "Redirecting to Shopify Billing..." : "Activate Subscription"}</span>
+                </button>
               )}
             </div>
             <p className="text-xs text-gray-400">{userEmail}</p>
@@ -169,12 +199,23 @@ export const AuthenticatedHome = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <a
-            href={storePlan?.hasActivePayment ? "/app/plans?view=true&returnTo=/app" : "/app/plans?returnTo=/app"}
-            className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs"
-          >
-            <span>Subscription</span>
-          </a>
+          {storePlan?.hasActivePayment ? (
+            <a
+              href="/app/plans"
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs"
+            >
+              <span>Subscription</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleSubscribe()}
+              disabled={isSubscribing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 text-xs font-semibold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer"
+            >
+              <span>{isSubscribing ? "Redirecting..." : "Subscription"}</span>
+            </button>
+          )}
           <button
             onClick={handleDisconnect}
             disabled={isDisconnecting}
